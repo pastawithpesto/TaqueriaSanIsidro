@@ -369,6 +369,32 @@
 .driver-popover.tour .driver-popover-navigation-btns button + button {
     margin-left: 0.5rem;
 }
+.driver-popover.tour .tour-skip {
+    min-height: 2.75rem;
+    margin-left: -0.5rem;
+    padding: 0 0.5rem;
+    border-radius: 0.75rem;
+    color: var(--color-muted);
+    font: 500 15px var(--font-sans);
+    cursor: pointer;
+}
+.driver-popover.tour .tour-skip:hover {
+    color: var(--color-ink);
+    background: var(--color-sunken);
+}
+.driver-popover.tour .tour-skip-all {
+    margin-top: 0.75rem;
+    font-size: 14px;
+}
+.driver-popover.tour .tour-skip-all button {
+    color: var(--color-muted);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+.driver-popover.tour .tour-skip-all button:hover {
+    color: var(--color-ink);
+}
 .driver-popover.tour .driver-popover-arrow {
     border-color: var(--color-surface);
 }

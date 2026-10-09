@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Support\Tours;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -36,6 +37,15 @@ class OnboardingTest extends TestCase
         $this->actingAs($user)->postJson('/tutorial/visto', ['tour' => 'gastos'])->assertNoContent();
 
         $this->assertSame(['vender', 'gastos'], $user->fresh()->seen_tours);
+    }
+
+    public function test_skipping_all_tours_marks_every_screen_as_seen(): void
+    {
+        $user = User::factory()->create(['seen_tours' => ['vender']]);
+
+        $this->actingAs($user)->postJson('/tutorial/visto', ['tour' => 'todas'])->assertNoContent();
+
+        $this->assertSame(Tours::KEYS, $user->fresh()->seen_tours);
     }
 
     public function test_unknown_tour_is_rejected(): void

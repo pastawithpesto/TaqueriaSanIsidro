@@ -57,8 +57,8 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
         <div class="flex items-center gap-3">
             <a href="{{ route('pedidos') }}" class="grid size-11 place-items-center rounded-xl bg-white/10 hover:bg-white/15" aria-label="Volver a Pedidos" data-tour="cocina-volver"><x-icon name="left" /></a>
             <h1 class="font-display text-4xl font-bold">Cocina</h1>
-            <button type="button" data-tour-start="cocina" class="grid size-11 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white"
-                    aria-label="Cómo funciona esta pantalla" title="Cómo funciona esta pantalla"><x-icon name="help" class="size-6" /></button>
+            <button type="button" data-tour-start="cocina" class="inline-flex h-10 items-center gap-1.5 rounded-full border border-white/15 px-3 text-sm font-medium text-white/75 hover:bg-white/10 hover:text-white"
+                    aria-label="Tutorial de esta pantalla" title="Tutorial de esta pantalla"><x-icon name="help" class="size-4" /> Tutorial</button>
             <span class="num rounded-full bg-[#ffc233] px-3 py-0.5 text-2xl font-bold text-[#33200f]">{{ $this->queue->count() }}</span>
         </div>
         <span class="num text-3xl font-bold text-white/70" x-text="new Date(now).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })"></span>

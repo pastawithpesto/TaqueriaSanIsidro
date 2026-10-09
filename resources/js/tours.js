@@ -3,7 +3,7 @@ import 'driver.js/dist/driver.css';
 
 /*
  * Recorridos guiados (driver.js). Cada pantalla tiene el suyo: se muestra solo la primera
- * vez que se entra y después con el botón "?" del encabezado.
+ * vez que se entra (se puede omitir) y después con el botón Tutorial del encabezado.
  *
  * Cada paso lleva:
  *   el     nombre del data-tour a resaltar; sin él, el aviso sale centrado.
@@ -26,7 +26,7 @@ const tours = {
     vender: [
         {
             title: 'Bienvenido a {negocio}',
-            text: 'Esta app lleva las ventas, los pedidos, los gastos y la ganancia del negocio. En un par de minutos te enseño a tomar un pedido y dónde está cada cosa. Puedes salir cuando quieras con la X.',
+            text: 'Esta app lleva las ventas, los pedidos, los gastos y la ganancia del negocio. En un par de minutos te enseño a tomar un pedido y dónde está cada cosa. Si ya la conoces, toca Omitir.',
         },
         {
             el: 'producto',
@@ -126,7 +126,7 @@ const tours = {
         {
             el: 'ayuda',
             title: '¿Dudas después?',
-            text: 'Cada pantalla tiene este botón para volver a ver cómo funciona. La primera vez que entres a cada una, la explicación sale sola.',
+            text: 'Cada pantalla tiene este botón Tutorial para volver a ver cómo funciona. La primera vez que entres a cada una, la explicación sale sola; si no la necesitas, toca Omitir.',
         },
     ],
 
@@ -470,6 +470,7 @@ async function prepare(open) {
 }
 
 function markSeen(key) {
+    if (key === 'todas') Object.keys(tours).forEach((k) => seenNow.add(k));
     seenNow.add(key);
     fetch('/tutorial/visto', {
         method: 'POST',
@@ -482,7 +483,21 @@ function markSeen(key) {
     }).catch(() => {});
 }
 
-export async function startTour(key) {
+// Botón de texto para el pie o la descripción del cuadro.
+function textButton(className, label, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+/**
+ * @param {string} key
+ * @param {{ auto?: boolean }} options  auto: se abrió solo al entrar a la pantalla.
+ */
+export async function startTour(key, { auto = false } = {}) {
     if (active?.isActive()) return;
 
     const business = escapeHtml(document.body.dataset.business ?? '');
@@ -516,7 +531,7 @@ export async function startTour(key) {
         popoverClass: 'tour',
         overlayColor: '#1a110a',
         overlayOpacity: 0.6,
-        // Un toque fuera del cuadro no cierra el recorrido: se sale con la X.
+        // Un toque fuera del cuadro no cierra el recorrido: se sale con Omitir o la X.
         overlayClickBehavior: 'none',
         disableActiveInteraction: true,
         smoothScroll: true,
@@ -525,6 +540,23 @@ export async function startTour(key) {
         onNextClick: (el, step, { driver: tour }) => go(tour, tour.getActiveIndex() + 1),
         onPrevClick: (el, step, { driver: tour }) => go(tour, tour.getActiveIndex() - 1),
         onDoneClick: (el, step, { driver: tour }) => tour.destroy(),
+        // Omitir en cada paso; si salió solo, también se pueden apagar todas las explicaciones.
+        onPopoverRender: (popover, { driver: tour }) => {
+            popover.footer.prepend(textButton('tour-skip', 'Omitir', () => tour.destroy()));
+
+            if (auto) {
+                const row = document.createElement('p');
+                row.className = 'tour-skip-all';
+                row.append(textButton('', 'No volver a mostrar explicaciones', () => {
+                    markSeen('todas');
+                    tour.destroy();
+                    window.dispatchEvent(new CustomEvent('toast', {
+                        detail: { message: 'Ya no saldrán solas. Usa el botón Tutorial de cada pantalla cuando quieras.', ms: 5000 },
+                    }));
+                }));
+                popover.description.after(row);
+            }
+        },
         onDestroyed: () => {
             active = null;
             prepare(null);
@@ -538,7 +570,7 @@ export async function startTour(key) {
 
 window.startTour = startTour;
 
-// El botón "?" de cada encabezado (data-tour-start) lo inicia, y también marca de qué pantalla es.
+// El botón Tutorial de cada encabezado (data-tour-start) lo inicia, y también marca de qué pantalla es.
 document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-tour-start]');
     if (button) startTour(button.dataset.tourStart);
@@ -568,7 +600,7 @@ document.addEventListener('livewire:navigated', () => {
     } catch (e) {}
 
     if (!saved.includes(key) && !seenNow.has(key)) {
-        setTimeout(() => startTour(key), 600);
+        setTimeout(() => startTour(key, { auto: true }), 600);
     }
 });
 

@@ -234,7 +234,7 @@ new #[Title('Ajustes')] class extends Component
             <span class="grid size-12 shrink-0 place-items-center rounded-2xl bg-limon text-on-limon"><x-icon name="help" class="size-6" /></span>
             <div class="min-w-0 flex-1">
                 <h2 class="section-title">Explicaciones</h2>
-                <p class="text-sm text-muted">Cada pantalla tiene un botón ? junto a su título que explica cómo usarla. La primera vez que entras a cada una, la explicación sale sola.</p>
+                <p class="text-sm text-muted">Cada pantalla tiene un botón Tutorial junto a su título que explica cómo usarla. La primera vez que entras a cada una, la explicación sale sola.</p>
             </div>
         </div>
         <div class="flex flex-wrap gap-2">

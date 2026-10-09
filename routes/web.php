@@ -25,11 +25,12 @@ Route::middleware('auth')->group(function () {
     Route::livewire('/insumos', 'pages::insumos')->name('insumos');
     Route::livewire('/ajustes', 'pages::ajustes')->name('ajustes');
 
-    // Marca un recorrido como visto para no mostrarlo solo otra vez.
+    // Marca un recorrido como visto para no mostrarlo solo otra vez; "todas" apaga las explicaciones automáticas.
     Route::post('/tutorial/visto', function (Request $request) {
-        $tour = $request->validate(['tour' => ['required', Rule::in(Tours::KEYS)]])['tour'];
+        $tour = $request->validate(['tour' => ['required', Rule::in([...Tours::KEYS, 'todas'])]])['tour'];
         $user = $request->user();
-        $user->update(['seen_tours' => array_values(array_unique([...$user->seen_tours ?? [], $tour]))]);
+        $seen = $tour === 'todas' ? Tours::KEYS : [...$user->seen_tours ?? [], $tour];
+        $user->update(['seen_tours' => array_values(array_unique($seen))]);
 
         return response()->noContent();
     })->name('tutorial.done');

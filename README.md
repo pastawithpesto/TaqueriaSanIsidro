@@ -77,7 +77,7 @@ docker compose logs -f app
 - Corte de caja: efectivo esperado contra contado, con entradas y retiros de efectivo.
 - Lista de compras: sugerencia por insumo según lo usado los mismos días de semanas anteriores.
 - Ajustes: nombre y logo del negocio (se usan en el login, el menú y el ícono de la app instalable), y cambio de contraseña.
-- Explicaciones: cada pantalla tiene un recorrido guiado (driver.js) que resalta sus partes. Sale solo la primera vez y se repite con el botón ? del encabezado. Los pasos y textos están en `resources/js/tours.js`.
+- Explicaciones: cada pantalla tiene un recorrido guiado (driver.js) que resalta sus partes. Sale sola la primera vez (se puede omitir o apagar) y se repite con el botón Tutorial del encabezado. Los pasos y textos están en `resources/js/tours.js`.
 
 Cada venta guarda el costo de receta del momento, así el historial no cambia si luego sube la carne.
 
