@@ -25,18 +25,25 @@ new #[Title('Ajustes')] class extends Component
 
     public ?string $packaging_fee = '0';
 
+    public ?string $delivery_fee = '0';
+
     public function mount(): void
     {
         $this->name = Branding::name();
         $this->short_name = Branding::shortName();
         $this->packaging_fee = Setting::value('packaging_fee', '0');
+        $this->delivery_fee = Setting::value('delivery_fee', '0');
     }
 
     public function savePackaging(): void
     {
-        $this->validate(['packaging_fee' => ['required', 'numeric', 'min:0', 'max:1000']], attributes: ['packaging_fee' => 'cobro por empaque']);
+        $this->validate([
+            'packaging_fee' => ['required', 'numeric', 'min:0', 'max:1000'],
+            'delivery_fee' => ['required', 'numeric', 'min:0', 'max:1000'],
+        ], attributes: ['packaging_fee' => 'cobro por empaque', 'delivery_fee' => 'envío a domicilio']);
         Setting::put('packaging_fee', (float) $this->packaging_fee > 0 ? (string) round((float) $this->packaging_fee, 2) : null);
-        $this->dispatch('toast', message: 'Cobro por empaque guardado');
+        Setting::put('delivery_fee', (float) $this->delivery_fee > 0 ? (string) round((float) $this->delivery_fee, 2) : null);
+        $this->dispatch('toast', message: 'Cobros guardados');
     }
 
     public function saveBusiness(): void
@@ -161,17 +168,22 @@ new #[Title('Ajustes')] class extends Component
     {{-- Para llevar --}}
     <form wire:submit="savePackaging" class="card space-y-4">
         <div>
-            <h2 class="section-title">Para llevar</h2>
-            <p class="text-sm text-muted">Si cobras el desechable, se suma una vez a cada pedido para llevar. Déjalo en 0 si no lo cobras.</p>
+            <h2 class="section-title">Para llevar y a domicilio</h2>
+            <p class="text-sm text-muted">El empaque se suma una vez a cada pedido para llevar o a domicilio. El envío es el costo normal; se puede cambiar en cada pedido. Deja 0 si no cobras.</p>
         </div>
-        <div class="flex items-end gap-3">
-            <div class="w-40">
-                <label class="label" for="packaging_fee">Cobro por empaque</label>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="label" for="packaging_fee">Empaque</label>
                 <x-money-input id="packaging_fee" wire:model="packaging_fee" />
             </div>
-            <button class="btn-primary h-12" wire:loading.attr="disabled">Guardar</button>
+            <div>
+                <label class="label" for="delivery_fee">Envío a domicilio</label>
+                <x-money-input id="delivery_fee" wire:model="delivery_fee" />
+            </div>
         </div>
         @error('packaging_fee') <p class="error">{{ $message }}</p> @enderror
+        @error('delivery_fee') <p class="error">{{ $message }}</p> @enderror
+        <button class="btn-primary" wire:loading.attr="disabled">Guardar</button>
     </form>
 
     {{-- Contraseña --}}

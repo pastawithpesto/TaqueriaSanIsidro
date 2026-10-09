@@ -205,9 +205,13 @@ new #[Title('Ventas')] class extends Component
                                         </li>
                                     @endforeach
                                 </ul>
-                                @if ((float) $order->packaging_fee > 0 || (float) $order->discount > 0 || (float) $order->tip > 0 || $order->payments->count() > 1)
+                                @if ($order->isDelivery())
+                                    <p class="text-muted">A domicilio: <span class="font-semibold text-ink">{{ $order->delivery_address }}</span>@if ($order->delivery_phone), {{ $order->delivery_phone }}@endif</p>
+                                @endif
+                                @if ((float) $order->packaging_fee > 0 || (float) $order->delivery_fee > 0 || (float) $order->discount > 0 || (float) $order->tip > 0 || $order->payments->count() > 1)
                                     <div class="space-y-1 border-t border-line pt-2 text-muted">
                                         @if ((float) $order->packaging_fee > 0) <p class="flex justify-between">Empaque <span class="num text-base font-semibold text-ink">{{ money($order->packaging_fee) }}</span></p> @endif
+                                        @if ((float) $order->delivery_fee > 0) <p class="flex justify-between">Envío <span class="num text-base font-semibold text-ink">{{ money($order->delivery_fee) }}</span></p> @endif
                                         @if ((float) $order->discount > 0) <p class="flex justify-between">Descuento <span class="num text-base font-semibold text-salsa">−{{ money($order->discount) }}</span></p> @endif
                                         @if ((float) $order->tip > 0) <p class="flex justify-between">Propina <span class="num text-base font-semibold text-ink">{{ money($order->tip) }}</span></p> @endif
                                         @if ($order->payments->count() > 1)

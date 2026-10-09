@@ -83,8 +83,8 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                             <div class="min-w-0 flex-1">
                                 <p class="truncate font-display text-3xl leading-tight font-bold">{{ $order->label ?: 'Sin nombre' }}</p>
                                 <p class="mt-1 flex flex-wrap items-center gap-2 text-base">
-                                    @if ($order->service)
-                                        <span class="rounded-md bg-white/12 px-2 py-0.5 font-semibold">{{ $order->isToGo() ? 'Para llevar' : 'Aquí' }}</span>
+                                    @if ($order->serviceLabel())
+                                        <span @class(['rounded-md px-2 py-0.5 font-semibold', 'bg-[#fe964d] text-[#4e2c11]' => $order->isDelivery(), 'bg-white/12' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
                                     @endif
                                     @if ($pickup)
                                         <span class="rounded-md bg-[#fe964d] px-2 py-0.5 font-semibold text-[#4e2c11]">Recoge {{ $order->pickup_at->format('g:i a') }}</span>

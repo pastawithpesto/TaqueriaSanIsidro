@@ -97,7 +97,8 @@ class OrderBuilder
     {
         $order->items()->delete();
         $order->items()->createMany($built['items']);
-        $order->update(['total' => max(0, round($built['total'] + (float) $order->packaging_fee - (float) $order->discount, 2))]);
+        // El descuento aplica a la comida y el empaque; el envío se suma aparte.
+        $order->update(['total' => max(0, round($built['total'] + (float) $order->packaging_fee - (float) $order->discount, 2)) + (float) $order->delivery_fee]);
     }
 
     /** Renglones del navegador a partir de una orden guardada (para editarla). */

@@ -35,6 +35,15 @@ new #[Title('Pedidos')] class extends Component
         $this->dispatch('toast', message: 'Entregado #'.$order->daily_number.($order->label ? ' '.$order->label : ''));
     }
 
+    /** A domicilio: sale con el repartidor. */
+    public function dispatchOrder(int $id): void
+    {
+        $order = Order::findOrFail($id);
+        $order->update(['dispatched_at' => now()]);
+        unset($this->pending);
+        $this->dispatch('toast', message: '#'.$order->daily_number.' en camino');
+    }
+
     public function undeliver(int $id): void
     {
         Order::whereKey($id)->update(['delivered_at' => null]);
@@ -84,8 +93,11 @@ new #[Title('Pedidos')] class extends Component
                                     @else
                                         <span class="badge bg-salsa-soft text-salsa">Pagado</span>
                                     @endif
-                                    @if ($order->service)
-                                        <span class="badge bg-sunken text-ink">{{ $order->isToGo() ? 'Para llevar' : 'Aquí' }}</span>
+                                    @if ($order->serviceLabel())
+                                        <span @class(['badge', 'bg-naranja text-on-limon' => $order->isDelivery(), 'bg-sunken text-ink' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
+                                    @endif
+                                    @if ($order->dispatched_at && ! $delivered)
+                                        <span class="badge bg-sales text-white">En camino</span>
                                     @endif
                                     @if ($order->ready_at && ! $delivered)
                                         <span class="badge bg-salsa text-white">Listo</span>
@@ -110,6 +122,22 @@ new #[Title('Pedidos')] class extends Component
                             </div>
                             <span class="num text-[1.5rem] font-bold">{{ money($order->total) }}</span>
                         </div>
+
+                        @if ($order->isDelivery())
+                            <div class="mx-4 mt-3 space-y-2 rounded-xl bg-naranja-soft/70 px-3 py-2.5">
+                                <p class="text-[15px] leading-snug font-semibold">{{ $order->delivery_address }}</p>
+                                @if ($order->delivery_notes) <p class="text-sm text-muted">{{ $order->delivery_notes }}</p> @endif
+                                <div class="flex flex-wrap gap-2">
+                                    @if ($order->delivery_phone)
+                                        <a href="tel:{{ preg_replace('/[^\d+]/', '', $order->delivery_phone) }}" class="btn !min-h-9 !px-3"><x-icon name="phone" class="size-4" /> Llamar</a>
+                                    @endif
+                                    @if ($order->whatsappNumber())
+                                        <a href="https://wa.me/{{ $order->whatsappNumber() }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="chat" class="size-4" /> WhatsApp</a>
+                                    @endif
+                                    <a href="https://www.google.com/maps/search/?api=1&query={{ urlencode($order->delivery_address) }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="pin" class="size-4" /> Mapa</a>
+                                </div>
+                            </div>
+                        @endif
 
                         <ul class="mt-3 flex-1 space-y-2 border-t border-line px-4 py-3">
                             @foreach ($order->items as $item)
@@ -152,11 +180,15 @@ new #[Title('Pedidos')] class extends Component
                                 </div>
                                 <a href="{{ route('vender', ['orden' => $order->id, 'cobrar' => 1]) }}" wire:navigate class="btn flex-1">Cobrar</a>
                             @endif
-                            @unless ($delivered)
-                                <button type="button" wire:click="deliver({{ $order->id }})" class="btn-primary flex-1 !bg-salsa !border-salsa hover:!opacity-90">
-                                    <x-icon name="check" class="size-4" /> Entregar
+                            @if (! $delivered && $order->isDelivery() && ! $order->dispatched_at)
+                                <button type="button" wire:click="dispatchOrder({{ $order->id }})" class="btn-primary flex-1 !border-sales !bg-sales hover:!opacity-90">
+                                    <x-icon name="right" class="size-4" /> Enviar
                                 </button>
-                            @endunless
+                            @elseif (! $delivered)
+                                <button type="button" wire:click="deliver({{ $order->id }})" class="btn-primary flex-1 !bg-salsa !border-salsa hover:!opacity-90">
+                                    <x-icon name="check" class="size-4" /> Entregado
+                                </button>
+                            @endif
                         </div>
                     </li>
                 @endforeach

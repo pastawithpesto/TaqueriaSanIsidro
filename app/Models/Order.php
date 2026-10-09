@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'delivered_at'])]
+#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at'])]
 class Order extends Model
 {
     protected function casts(): array
@@ -21,6 +21,8 @@ class Order extends Model
             'payment_method' => PaymentMethod::class,
             'total' => 'decimal:2',
             'packaging_fee' => 'decimal:2',
+            'delivery_fee' => 'decimal:2',
+            'dispatched_at' => 'datetime',
             'discount' => 'decimal:2',
             'tip' => 'decimal:2',
             'sold_at' => 'datetime',
@@ -67,6 +69,33 @@ class Order extends Model
     public function isToGo(): bool
     {
         return $this->service === 'togo';
+    }
+
+    public function isDelivery(): bool
+    {
+        return $this->service === 'delivery';
+    }
+
+    public function serviceLabel(): ?string
+    {
+        return match ($this->service) {
+            'togo' => 'Para llevar',
+            'here' => 'Aquí',
+            'delivery' => 'A domicilio',
+            default => null,
+        };
+    }
+
+    /** Número para WhatsApp: 10 dígitos de México se completan con 52. */
+    public function whatsappNumber(): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $this->delivery_phone);
+
+        return match (true) {
+            strlen($digits) === 10 => '52'.$digits,
+            strlen($digits) > 10 => $digits,
+            default => null,
+        };
     }
 
     /** Número consecutivo del día (#1, #2...) para llamar el pedido. */

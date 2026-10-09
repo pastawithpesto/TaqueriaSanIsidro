@@ -42,7 +42,7 @@ docker compose logs -f app
 
 - Vender: botones por producto, indicaciones por pieza ("sin cebolla" sale de la receta y descuenta su costo; extras con precio), nota libre y nombre del pedido. Se cobra de una vez o se guarda sin cobrar.
 - Pedidos: cola de lo que falta entregar y de lo que falta cobrar, con tiempo de espera y hora de recogida. Pantalla de cocina para una tablet.
-- Combos con opciones para elegir (refresco), para llevar o aquí, productos agotados por día.
+- Combos con opciones para elegir (refresco), para llevar, aquí o a domicilio (dirección, teléfono, envío, accesos a llamar, WhatsApp y mapa), productos agotados por día.
 - Propinas aparte de las ventas, descuentos, cortesías y pago mixto.
 - Ventas: historial por día, con cancelación.
 - Gastos: compras de insumos, gas, desechables, etc. Una compra de insumo con cantidad actualiza el costo por unidad.

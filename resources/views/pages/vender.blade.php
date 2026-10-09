@@ -31,6 +31,15 @@ new #[Title('Vender')] class extends Component
     /** 'togo' para llevar o 'here' para comer aquí. */
     public string $service = 'togo';
 
+    /** A domicilio. */
+    public ?string $address = null;
+
+    public ?string $phone = null;
+
+    public ?string $addressNotes = null;
+
+    public ?string $deliveryFee = null;
+
     /** Hora de recogida (HH:MM) si el pedido es para más tarde. */
     public ?string $pickupTime = null;
 
@@ -78,6 +87,10 @@ new #[Title('Vender')] class extends Component
         $this->lines = OrderBuilder::linesFrom($order);
         $this->label = $order->label;
         $this->service = $order->service ?? 'togo';
+        $this->address = $order->delivery_address;
+        $this->phone = $order->delivery_phone;
+        $this->addressNotes = $order->delivery_notes;
+        $this->deliveryFee = $order->isDelivery() ? rtrim(rtrim((string) $order->delivery_fee, '0'), '.') : null;
         $this->discount = (float) $order->discount > 0 ? rtrim(rtrim((string) $order->discount, '0'), '.') : null;
         $this->pickupTime = $order->pickup_at?->format('H:i');
         // Desde Pedidos, "Cobrar" abre directo el cuadro de cobro.
@@ -127,6 +140,28 @@ new #[Title('Vender')] class extends Component
         return (float) Setting::value('packaging_fee', '0');
     }
 
+    #[Computed]
+    public function defaultDeliveryFee(): float
+    {
+        return (float) Setting::value('delivery_fee', '0');
+    }
+
+    protected function deliveryFeeAmount(): float
+    {
+        if ($this->service !== 'delivery') {
+            return 0.0;
+        }
+
+        return is_numeric($this->deliveryFee) ? round(max(0, (float) $this->deliveryFee), 2) : $this->defaultDeliveryFee;
+    }
+
+    protected function deliveryError(): ?string
+    {
+        return $this->service === 'delivery' && trim((string) $this->address) === ''
+            ? 'Escribe la dirección de entrega.'
+            : null;
+    }
+
     /** Marca o desmarca un producto como agotado por hoy. El navegador ya lo muestra; no hace falta volver a pintar. */
     #[Renderless]
     public function toggleSoldOut(int $id): void
@@ -150,7 +185,7 @@ new #[Title('Vender')] class extends Component
 
     protected function feeFor(string $service): float
     {
-        return $service === 'togo' ? $this->packagingFee : 0.0;
+        return in_array($service, ['togo', 'delivery'], true) ? $this->packagingFee : 0.0;
     }
 
     /** Descuento en pesos sobre productos + empaque (nunca más que eso). */
@@ -208,7 +243,11 @@ new #[Title('Vender')] class extends Component
             $order->fill([
                 'status' => $status,
                 'label' => trim((string) $this->label) ?: null,
-                'service' => in_array($this->service, ['togo', 'here'], true) ? $this->service : null,
+                'service' => in_array($this->service, ['togo', 'here', 'delivery'], true) ? $this->service : null,
+                'delivery_address' => $this->service === 'delivery' ? trim((string) $this->address) : null,
+                'delivery_phone' => $this->service === 'delivery' ? (trim((string) $this->phone) ?: null) : null,
+                'delivery_notes' => $this->service === 'delivery' ? (trim((string) $this->addressNotes) ?: null) : null,
+                'delivery_fee' => $this->deliveryFeeAmount(),
                 'packaging_fee' => $this->feeFor($this->service),
                 'pickup_at' => $this->pickupAt(),
                 'payment_method' => $paid ? $this->method : null,
@@ -216,7 +255,7 @@ new #[Title('Vender')] class extends Component
                 'paid_at' => $paid ? now() : null,
                 'discount' => $this->discountFor($base),
                 'tip' => $paid ? $this->tipAmount() : 0,
-                'total' => max(0, $base - $this->discountFor($base)),
+                'total' => max(0, $base - $this->discountFor($base)) + $this->deliveryFeeAmount(),
             ])->save();
 
             OrderBuilder::fill($order, $built);
@@ -232,7 +271,7 @@ new #[Title('Vender')] class extends Component
 
     protected function finish(): void
     {
-        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime', 'discount', 'tip', 'cashPart');
+        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime', 'discount', 'tip', 'cashPart', 'address', 'phone', 'addressNotes', 'deliveryFee');
         $this->method = 'cash';
         $this->discountType = 'amount';
         $this->otherMethod = 'transfer';
@@ -257,8 +296,12 @@ new #[Title('Vender')] class extends Component
             return ['ok' => false, 'error' => 'Falta elegir: '.implode(', ', $built['missing']).'.'];
         }
 
+        if ($error = $this->deliveryError()) {
+            return ['ok' => false, 'error' => $error];
+        }
+
         $base = $built['total'] + $this->feeFor($this->service);
-        $due = max(0, $base - $this->discountFor($base)) + $this->tipAmount();
+        $due = max(0, $base - $this->discountFor($base)) + $this->deliveryFeeAmount() + $this->tipAmount();
 
         if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $due) {
             return ['ok' => false, 'error' => 'El monto recibido no alcanza para el total.'];
@@ -288,6 +331,10 @@ new #[Title('Vender')] class extends Component
     {
         if (trim((string) $this->label) === '') {
             return ['ok' => false, 'error' => 'Escribe para quién es (un nombre o el carro) para encontrarlo después.'];
+        }
+
+        if ($error = $this->deliveryError()) {
+            return ['ok' => false, 'error' => $error];
         }
 
         $built = OrderBuilder::items($this->lines);
@@ -335,6 +382,7 @@ new #[Title('Vender')] class extends Component
     x-data="{
         catalog: @js($this->catalog),
         fee: @js($this->packagingFee),
+        deliveryDefault: @js($this->defaultDeliveryFee),
         stock: false,
         later: @js((bool) $pickupTime),
         category: '',
@@ -408,17 +456,22 @@ new #[Title('Vender')] class extends Component
             };
         },
         count() { return this.list().reduce((n, l) => n + l.qty, 0) },
-        packaging() { return $wire.service === 'togo' ? this.fee : 0 },
+        packaging() { return ['togo', 'delivery'].includes($wire.service) ? this.fee : 0 },
+        shipping() {
+            if ($wire.service !== 'delivery' || ! this.count()) return 0;
+            const v = $wire.deliveryFee;
+            return v === null || v === '' || isNaN(v) ? this.deliveryDefault : Math.max(0, Number(v));
+        },
         r2(n) { return Math.round(n * 100) / 100 },
         subtotal() { return this.r2(this.list().reduce((t, l) => t + this.unit(l) * l.qty, 0) + (this.count() ? this.packaging() : 0)) },
         discountAmt() {
             const v = Math.max(0, Number($wire.discount) || 0), base = this.subtotal();
             return this.r2(Math.min(base, $wire.discountType === 'percent' ? base * Math.min(100, v) / 100 : v));
         },
-        total() { return this.r2(Math.max(0, this.subtotal() - this.discountAmt())) },
+        total() { return this.r2(Math.max(0, this.subtotal() - this.discountAmt()) + this.shipping()) },
         tipAmt() { return this.r2(Math.max(0, Number($wire.tip) || 0)) },
         due() { return this.r2(this.total() + this.tipAmt()) },
-        setTip(pct) { $wire.tip = pct === null ? null : String(this.r2(this.total() * pct / 100)) },
+        setTip(pct) { $wire.tip = pct === null ? null : String(this.r2((this.total() - this.shipping()) * pct / 100)) },
         change() {
             const r = $wire.received;
             if ($wire.method !== 'cash' || r === null || r === '' || isNaN(r)) return null;
@@ -618,15 +671,36 @@ new #[Title('Vender')] class extends Component
                     <input id="label" type="text" x-model="$wire.label" maxlength="60" class="input" placeholder="Ej. camioneta negra, Juan, mesa 2" autocomplete="off">
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <p class="label">Servicio</p>
+                    <div class="segmented" role="group" aria-label="Servicio">
+                        <button type="button" @click="$wire.service = 'togo'" :aria-pressed="$wire.service === 'togo'">Para llevar</button>
+                        <button type="button" @click="$wire.service = 'here'" :aria-pressed="$wire.service === 'here'">Aquí</button>
+                        <button type="button" @click="$wire.service = 'delivery'; $nextTick(() => $refs.address?.focus())" :aria-pressed="$wire.service === 'delivery'">A domicilio</button>
+                    </div>
+                </div>
+                <div x-show="$wire.service === 'delivery'" x-cloak class="space-y-3 rounded-2xl bg-naranja-soft/70 p-4">
                     <div>
-                        <p class="label">Servicio</p>
-                        <div class="segmented" role="group" aria-label="Servicio">
-                            <button type="button" @click="$wire.service = 'togo'" :aria-pressed="$wire.service === 'togo'">Para llevar</button>
-                            <button type="button" @click="$wire.service = 'here'" :aria-pressed="$wire.service === 'here'">Aquí</button>
+                        <label class="label" for="address">Dirección</label>
+                        <input id="address" x-ref="address" type="text" x-model="$wire.address" maxlength="255" class="input" placeholder="Calle, número y colonia" autocomplete="off">
+                    </div>
+                    <div class="grid grid-cols-[1fr_7.5rem] gap-3">
+                        <div>
+                            <label class="label" for="phone">Teléfono</label>
+                            <input id="phone" type="tel" inputmode="tel" x-model="$wire.phone" maxlength="30" class="input" placeholder="868 123 4567" autocomplete="off">
+                        </div>
+                        <div>
+                            <label class="label" for="delivery-fee">Envío</label>
+                            <x-money-input id="delivery-fee" x-model="$wire.deliveryFee" x-bind:placeholder="String(deliveryDefault)" />
                         </div>
                     </div>
                     <div>
+                        <label class="label" for="address-notes">Referencias <span class="font-normal text-muted">(opcional)</span></label>
+                        <input id="address-notes" type="text" x-model="$wire.addressNotes" maxlength="160" class="input" placeholder="Ej. casa azul, portón negro">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2">
                         <p class="label">¿Cuándo?</p>
                         <div class="segmented" role="group" aria-label="Cuándo">
                             <button type="button" @click="later = false; $wire.pickupTime = null" :aria-pressed="! later">Ahora</button>
@@ -649,7 +723,7 @@ new #[Title('Vender')] class extends Component
 
                 {{-- Desglose --}}
                 <div class="space-y-1.5 rounded-2xl bg-sunken px-4 py-3 text-[15px]">
-                    <div class="flex justify-between" x-show="packaging() > 0 || discountAmt() > 0" x-cloak>
+                    <div class="flex justify-between" x-show="packaging() > 0 || discountAmt() > 0 || shipping() > 0" x-cloak>
                         <span class="text-muted" x-text="count() === 1 ? '1 producto' : count() + ' productos'"></span>
                         <span class="num text-lg font-semibold" x-text="fmt(subtotal() - (count() ? packaging() : 0))"></span>
                     </div>
@@ -661,8 +735,12 @@ new #[Title('Vender')] class extends Component
                         <span>Descuento</span>
                         <span class="num text-lg font-semibold" x-text="'−' + fmt(discountAmt())"></span>
                     </div>
-                    <div class="flex items-end justify-between pt-1" :class="(packaging() > 0 || discountAmt() > 0) && 'border-t border-line'">
-                        <span class="pb-1 text-sm font-semibold text-muted" x-text="(packaging() > 0 || discountAmt() > 0) ? 'Total' : (count() === 1 ? '1 producto' : count() + ' productos')"></span>
+                    <div class="flex justify-between" x-show="shipping() > 0" x-cloak>
+                        <span class="text-muted">Envío a domicilio</span>
+                        <span class="num text-lg font-semibold" x-text="fmt(shipping())"></span>
+                    </div>
+                    <div class="flex items-end justify-between pt-1" :class="(packaging() > 0 || discountAmt() > 0 || shipping() > 0) && 'border-t border-line'">
+                        <span class="pb-1 text-sm font-semibold text-muted" x-text="(packaging() > 0 || discountAmt() > 0 || shipping() > 0) ? 'Total' : (count() === 1 ? '1 producto' : count() + ' productos')"></span>
                         <span class="num text-[2.75rem] leading-none font-bold" x-text="fmt(total())"></span>
                     </div>
                 </div>
@@ -698,8 +776,8 @@ new #[Title('Vender')] class extends Component
                     <p class="label">Propina <span class="font-normal text-muted">(no cuenta como venta)</span></p>
                     <div class="flex flex-wrap items-center gap-2">
                         <button type="button" class="chip" :aria-pressed="tipAmt() === 0" @click="setTip(null)">Sin propina</button>
-                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2(total() * 0.10)" @click="setTip(10)">10%</button>
-                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2(total() * 0.15)" @click="setTip(15)">15%</button>
+                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2((total() - shipping()) * 0.10)" @click="setTip(10)">10%</button>
+                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2((total() - shipping()) * 0.15)" @click="setTip(15)">15%</button>
                         <div class="relative w-28">
                             <span class="num pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 font-semibold text-muted">$</span>
                             <input type="number" inputmode="decimal" min="0" step="0.5" x-model="$wire.tip" class="input num !min-h-9 !py-1 !pl-7 text-base font-semibold" placeholder="Otra" aria-label="Otra propina">
