@@ -118,4 +118,33 @@ class CatalogTest extends TestCase
             ->set('newIngredient', $meat->id)->set('newQuantity', '0.08')->call('addIngredient')
             ->assertCount('recipe', 1);
     }
+
+    public function test_duplicate_copies_product_and_recipe(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
+        $taco = Product::create(['name' => 'Taco de bistec', 'category' => 'Tacos', 'price' => 20]);
+        $taco->ingredients()->attach($meat, ['quantity' => 0.05]);
+
+        Livewire::test('pages::productos')
+            ->call('duplicate', $taco->id)
+            ->assertSet('showForm', true)
+            ->assertSet('name', 'Taco de bistec (copia)');
+
+        $copy = Product::where('name', 'Taco de bistec (copia)')->with('ingredients')->sole();
+        $this->assertSame('Tacos', $copy->category);
+        $this->assertEquals(10.0, $copy->unitCost());
+    }
+
+    public function test_expense_can_be_marked_as_not_from_cash(): void
+    {
+        Livewire::test('pages::gastos')
+            ->call('create')
+            ->set('category', 'equipment')
+            ->set('total', '500')
+            ->set('from_cash', false)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertFalse(Expense::sole()->from_cash);
+    }
 }

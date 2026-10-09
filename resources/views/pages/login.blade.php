@@ -45,7 +45,7 @@ new #[Layout('layouts::guest')] #[Title('Entrar')] class extends Component
 };
 ?>
 
-<form wire:submit="login" class="card space-y-4">
+<form wire:submit="login" class="card space-y-4 !p-5">
     <div>
         <label class="label" for="email">Correo</label>
         <input id="email" type="email" wire:model="email" class="input" autocomplete="username" autofocus>
@@ -56,8 +56,8 @@ new #[Layout('layouts::guest')] #[Title('Entrar')] class extends Component
         <input id="password" type="password" wire:model="password" class="input" autocomplete="current-password">
         @error('password') <p class="error">{{ $message }}</p> @enderror
     </div>
-    <label class="flex items-center gap-2 text-sm text-stone-600">
-        <input type="checkbox" wire:model="remember" class="rounded border-stone-300"> Mantener sesión
+    <label class="flex items-center gap-3 text-sm font-medium text-muted">
+        <input type="checkbox" wire:model="remember" class="switch"> Mantener sesión en este equipo
     </label>
-    <button class="btn-primary w-full">Entrar</button>
+    <button wire:loading.attr="disabled" class="btn-primary btn-lg w-full">Entrar</button>
 </form>

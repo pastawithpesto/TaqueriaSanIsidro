@@ -13,7 +13,7 @@ class AuthTest extends TestCase
 
     public function test_guests_are_redirected_to_login(): void
     {
-        foreach (['/', '/vender', '/ventas', '/gastos', '/productos', '/insumos'] as $path) {
+        foreach (['/', '/resumen', '/ventas', '/gastos', '/productos', '/insumos', '/corte'] as $path) {
             $this->get($path)->assertRedirect('/login');
         }
     }
@@ -48,7 +48,7 @@ class AuthTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
 
-        foreach (['/', '/vender', '/ventas', '/gastos', '/productos', '/insumos'] as $path) {
+        foreach (['/', '/resumen', '/ventas', '/gastos', '/productos', '/insumos', '/corte'] as $path) {
             $this->get($path)->assertOk();
         }
     }

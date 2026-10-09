@@ -7,8 +7,9 @@ use Illuminate\Support\Facades\Route;
 Route::livewire('/login', 'pages::login')->middleware('guest')->name('login');
 
 Route::middleware('auth')->group(function () {
-    Route::livewire('/', 'pages::resumen')->name('resumen');
-    Route::livewire('/vender', 'pages::vender')->name('vender');
+    Route::livewire('/', 'pages::vender')->name('vender');
+    Route::livewire('/resumen', 'pages::resumen')->name('resumen');
+    Route::livewire('/corte', 'pages::corte')->name('corte');
     Route::livewire('/ventas', 'pages::ventas')->name('ventas');
     Route::livewire('/gastos', 'pages::gastos')->name('gastos');
     Route::livewire('/productos', 'pages::productos')->name('productos');

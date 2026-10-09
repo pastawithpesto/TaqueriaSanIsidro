@@ -3,34 +3,170 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
+/*
+ * Identidad: lona de taquería. Rojo chile para la acción, limón para el
+ * precio y lo seleccionado, tinta oscura para el texto. Los verdes y ámbar
+ * solo comunican estado (ganancia, faltante).
+ */
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans: 'Barlow', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Barlow Condensed', 'Barlow', ui-sans-serif, system-ui, sans-serif;
+
+    --color-bg: #f4f3f0;
+    --color-surface: #ffffff;
+    --color-sunken: #ebe9e5;
+    --color-ink: #1c1816;
+    --color-muted: #6a625d;
+    --color-line: #e1ded8;
+
+    --color-chile: #c62a1d;
+    --color-chile-strong: #a91f14;
+    --color-chile-soft: #fbe8e5;
+    --color-limon: #f6c416;
+    --color-limon-soft: #fdf1c4;
+    --color-salsa: #17803d;
+    --color-salsa-soft: #e0f2e6;
+
+    --color-on-limon: #1c1816;
+    --color-sales: #1f5fa8;
+    --color-spend: #b87800;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-bg: #131010;
+        --color-surface: #1d1918;
+        --color-sunken: #282322;
+        --color-ink: #f3eeea;
+        --color-muted: #a8a09a;
+        --color-line: #332d2b;
+
+        --color-chile: #d9392b;
+        --color-chile-strong: #e5584b;
+        --color-chile-soft: #3a1c19;
+        --color-limon-soft: #3a3210;
+        --color-salsa: #4cc07a;
+        --color-salsa-soft: #153322;
+
+        --color-sales: #4a8ad8;
+        --color-spend: #bf8410;
+    }
+}
+
+:root {
+    color-scheme: light dark;
+}
+
+html {
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-ink);
+}
+
+@layer base {
+    :focus-visible {
+        outline: 2px solid var(--color-chile);
+        outline-offset: 2px;
+    }
+}
+
+/* Barra de progreso de wire:navigate */
+#nprogress .bar {
+    background: var(--color-chile) !important;
+}
+
+@utility num {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.005em;
 }
 
 @layer components {
     .card {
-        @apply rounded-xl border border-stone-200 bg-white p-4 shadow-sm;
+        @apply rounded-2xl border border-line bg-surface p-4;
     }
     .label {
-        @apply mb-1 block text-sm font-medium text-stone-700;
+        @apply mb-1.5 block text-sm font-semibold text-ink;
+    }
+    .hint {
+        @apply mt-1 text-sm text-muted;
     }
     .input {
-        @apply block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-base text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-600/30;
+        @apply block min-h-12 w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-base text-ink placeholder:text-muted/70 focus:border-chile focus:outline-none focus:ring-2 focus:ring-chile/25;
     }
     .error {
-        @apply mt-1 text-sm text-red-600;
+        @apply mt-1 text-sm font-medium text-chile;
     }
     .btn {
-        @apply inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-amber-600/40 disabled:opacity-50;
+        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink hover:bg-sunken disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.98];
     }
     .btn-primary {
-        @apply inline-flex items-center justify-center rounded-lg border border-amber-700 bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-600/40 disabled:opacity-50;
+        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-chile bg-chile px-4 text-sm font-semibold text-white hover:bg-chile-strong disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.98];
     }
-    .th {
-        @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-stone-500;
+    .btn-lg {
+        @apply min-h-14 px-6 text-base;
     }
-    .td {
-        @apply px-3 py-2 text-sm;
+    .btn-quiet {
+        @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-muted hover:bg-sunken hover:text-ink;
     }
+    .btn-quiet-danger {
+        @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-chile hover:bg-chile-soft;
+    }
+    .chip {
+        @apply inline-flex min-h-9 items-center rounded-full border border-line bg-surface px-3.5 text-sm font-semibold text-ink motion-safe:transition;
+    }
+    .chip[aria-pressed='true'] {
+        @apply border-ink bg-ink text-bg;
+    }
+    .badge {
+        @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold;
+    }
+
+    /* Interruptor */
+    .switch {
+        @apply relative h-7 w-12 shrink-0 cursor-pointer appearance-none rounded-full bg-sunken ring-1 ring-inset ring-line motion-safe:transition;
+    }
+    .switch::after {
+        content: '';
+        @apply absolute left-0.5 top-0.5 size-6 rounded-full bg-surface shadow-sm ring-1 ring-line motion-safe:transition-transform;
+    }
+    .switch:checked {
+        @apply bg-salsa ring-salsa;
+    }
+    .switch:checked::after {
+        @apply translate-x-5 ring-transparent;
+    }
+
+    .sheet-in {
+        @apply motion-safe:animate-[sheet-in_220ms_cubic-bezier(0.2,0.8,0.2,1)];
+    }
+}
+
+@keyframes sheet-in {
+    from {
+        transform: translateY(24px);
+        opacity: 0;
+    }
+    to {
+        transform: none;
+        opacity: 1;
+    }
+}
+
+@keyframes bump {
+    40% {
+        transform: scale(1.18);
+    }
+}
+
+.bump {
+    @apply motion-safe:animate-[bump_180ms_ease-out];
+}
+
+[x-cloak] {
+    display: none !important;
 }
