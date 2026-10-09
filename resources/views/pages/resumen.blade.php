@@ -151,6 +151,33 @@ new #[Title('Resumen')] class extends Component
             ->map(fn ($h) => ['hour' => $h, 'sales' => (float) ($byHour[$h] ?? 0)]);
     }
 
+    /** Promedio de venta por día de la semana en las últimas 8 semanas (sin contar hoy). */
+    #[Computed]
+    public function weekdays(): array
+    {
+        $from = CarbonImmutable::today()->subWeeks(8);
+        $to = CarbonImmutable::today()->subSecond();
+
+        $orders = Order::with('items')->where('status', OrderStatus::Paid)->whereBetween('sold_at', [$from, $to])->get();
+        $names = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
+
+        $byWeekday = $orders->groupBy(fn ($o) => $o->sold_at->dayOfWeekIso);
+
+        return collect($names)->map(function ($label, $iso) use ($byWeekday) {
+            $orders = $byWeekday->get($iso, collect());
+            $days = $orders->groupBy(fn ($o) => $o->sold_at->toDateString())->count();
+            $top = $orders->flatMap->items->groupBy('product_name')->map->sum('quantity')->sortDesc();
+
+            return [
+                'label' => $label,
+                'avg' => $days ? (float) $orders->sum('total') / $days : 0.0,
+                'days' => $days,
+                'top' => $top->keys()->first(),
+                'topQty' => $days ? (int) round($top->first() / $days) : 0,
+            ];
+        })->all();
+    }
+
     #[Computed]
     public function setup(): array
     {
@@ -366,6 +393,36 @@ new #[Title('Resumen')] class extends Component
                                     <span class="min-w-0 flex-1 text-center">{{ $showAll || $loop->first || $loop->last || $loop->index % 7 === 0 ? $row['date']->translatedFormat($showAll ? 'D j' : 'j M') : '' }}</span>
                                 @endforeach
                             </div>
+                        </div>
+                    </section>
+                @endif
+
+                @php
+                    $week = collect($this->weekdays);
+                    $maxAvg = max(1, $week->max('avg'));
+                    $bestDay = $week->sortByDesc('avg')->keys()->first();
+                @endphp
+                @if ($week->sum('days') > 0)
+                    <section class="space-y-2">
+                        <h2 class="section-title px-1">Por día de la semana</h2>
+                        <div class="card space-y-3 !p-5">
+                            <p class="text-sm text-muted">Promedio de venta de las últimas 8 semanas, y lo que más se vende ese día.</p>
+                            <ul class="space-y-2.5">
+                                @foreach ($week as $iso => $d)
+                                    <li class="grid grid-cols-[5.5rem_1fr_auto] items-center gap-3 text-sm">
+                                        <span @class(['font-semibold', 'text-muted' => ! $d['days']])>{{ $d['label'] }}</span>
+                                        <span class="min-w-0">
+                                            <span class="block h-2.5 overflow-hidden rounded-full bg-sunken">
+                                                <span @class(['block h-full rounded-full', 'bg-sales' => $iso === $bestDay, 'bg-sales/45' => $iso !== $bestDay]) style="width: {{ $d['avg'] / $maxAvg * 100 }}%"></span>
+                                            </span>
+                                            @if ($d['top'])
+                                                <span class="mt-0.5 block truncate text-xs text-muted">Lo que más sale: {{ $d['top'] }} ({{ $d['topQty'] }} al día)</span>
+                                            @endif
+                                        </span>
+                                        <span class="num text-right text-base font-bold">{{ $d['days'] ? money(round($d['avg'])) : '-' }}</span>
+                                    </li>
+                                @endforeach
+                            </ul>
                         </div>
                     </section>
                 @endif

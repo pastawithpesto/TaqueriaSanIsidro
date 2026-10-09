@@ -13,6 +13,7 @@ Route::livewire('/login', 'pages::login')->middleware('guest')->name('login');
 Route::middleware('auth')->group(function () {
     Route::livewire('/', 'pages::vender')->name('vender');
     Route::livewire('/resumen', 'pages::resumen')->name('resumen');
+    Route::livewire('/compras', 'pages::compras')->name('compras');
     Route::livewire('/corte', 'pages::corte')->name('corte');
     Route::livewire('/pedidos', 'pages::pedidos')->name('pedidos');
     Route::livewire('/cocina', 'pages::cocina')->name('cocina');

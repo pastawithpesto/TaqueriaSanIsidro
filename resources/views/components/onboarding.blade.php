@@ -4,11 +4,11 @@
         ['title' => 'Bienvenido', 'text' => 'Aquí llevas las ventas, los gastos y las ganancias de '.Branding::name().'. En un minuto te enseñamos lo básico.'],
         ['title' => 'Tomar el pedido', 'text' => 'Toca un producto para sumarlo; con el botón − lo quitas. Luego toca Ver pedido.'],
         ['title' => 'Sin cebolla, extra queso', 'text' => 'En el pedido, toca un producto para darle indicaciones: sin cebolla, extras o una nota. Puedes aplicarlo solo a algunas piezas, por ejemplo 2 de 3 tortas.'],
-        ['title' => 'Cobrar o guardar', 'text' => 'Ponle nombre al pedido, como "camioneta negra". Cóbralo de una vez o guárdalo sin cobrar. Si te equivocas al cobrar, toca Deshacer.'],
+        ['title' => 'Cobrar o guardar', 'text' => 'Ponle nombre al pedido, como "camioneta negra". Cóbralo de una vez o guárdalo sin cobrar. Puedes dar descuento, recibir propina o cobrar mitad efectivo y mitad transferencia.'],
         ['title' => 'Pedidos', 'text' => 'Aquí ves lo que falta entregar, con su nombre, el tiempo de espera y las indicaciones. Entrega con un toque o cobra lo pendiente.'],
         ['title' => 'Gastos', 'text' => 'Anota lo que compras: carne, tortilla, gas. Si eliges el insumo y la cantidad, su costo se actualiza solo.'],
         ['title' => 'Recetas y extras', 'text' => 'En Más, Productos, arma la receta de cada producto, marca lo que se puede pedir sin y agrega extras con precio. Así la app calcula tu ganancia.'],
-        ['title' => 'Corte y resumen', 'text' => 'Al cerrar, haz el Corte de caja para ver si cuadra el efectivo. En Resumen ves cuánto vendiste y ganaste.'],
+        ['title' => 'Corte y resumen', 'text' => 'Al cerrar, haz el Corte de caja para ver si cuadra el efectivo. En Más tienes el Resumen, la lista de compras para mañana y la pantalla de cocina.'],
     ];
     $show = auth()->check() && auth()->user()->onboarded_at === null;
 @endphp
