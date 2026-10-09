@@ -12,7 +12,7 @@ new #[Title('Pedidos')] class extends Component
     #[Computed]
     public function pending()
     {
-        return Order::with('items')->pending()->orderBy('sold_at')->get();
+        return Order::with('items')->pending()->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
     }
 
     #[Computed]
@@ -53,6 +53,7 @@ new #[Title('Pedidos')] class extends Component
 <div wire:poll.15s.visible x-data="{ now: Date.now() }" x-init="setInterval(() => now = Date.now(), 30000)">
     <x-page-header title="Pedidos">
         <x-slot:actions>
+            <a href="{{ route('cocina') }}" class="btn"><x-icon name="flame" class="size-4" /> Cocina</a>
             <a href="{{ route('vender') }}" wire:navigate class="btn-primary"><x-icon name="plus" class="size-4" /> Pedido</a>
         </x-slot:actions>
     </x-page-header>
@@ -70,6 +71,7 @@ new #[Title('Pedidos')] class extends Component
                         $open = $order->status === OrderStatus::Open;
                         $delivered = $order->delivered_at !== null;
                         $since = $order->sold_at->getTimestampMs();
+                        $pickup = $order->pickup_at?->getTimestampMs();
                     @endphp
                     <li wire:key="po-{{ $order->id }}" class="card flex flex-col !p-0">
                         <div class="flex items-start gap-3 px-4 pt-4">
@@ -82,8 +84,21 @@ new #[Title('Pedidos')] class extends Component
                                     @else
                                         <span class="badge bg-salsa-soft text-salsa">Pagado</span>
                                     @endif
+                                    @if ($order->service)
+                                        <span class="badge bg-sunken text-ink">{{ $order->isToGo() ? 'Para llevar' : 'Aquí' }}</span>
+                                    @endif
+                                    @if ($order->ready_at && ! $delivered)
+                                        <span class="badge bg-salsa text-white">Listo</span>
+                                    @endif
                                     @if ($delivered)
                                         <span class="badge bg-sunken text-muted">Ya entregado</span>
+                                    @elseif ($pickup)
+                                        <span class="badge bg-naranja-soft text-ink"
+                                              :class="({{ $pickup }} - now) < 10 * 60000 && '!bg-chile !text-white'">
+                                            <x-icon name="clock" class="size-3.5" />
+                                            Recoge {{ $order->pickup_at->format('g:i a') }}
+                                            <span x-text="(() => { const m = Math.round(({{ $pickup }} - now) / 60000); return m <= 0 ? '(ya)' : (m < 60 ? '(en ' + m + ' min)' : '(en ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min)') })()"></span>
+                                        </span>
                                     @else
                                         <span class="flex items-center gap-1"
                                               :class="(now - {{ $since }}) > 15 * 60000 ? 'font-semibold text-chile' : 'text-muted'">

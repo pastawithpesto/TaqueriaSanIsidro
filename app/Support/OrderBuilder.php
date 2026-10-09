@@ -68,12 +68,12 @@ class OrderBuilder
         return ['items' => $items, 'total' => round($total, 2)];
     }
 
-    /** Reemplaza las partidas de la orden y actualiza su total. */
+    /** Reemplaza las partidas de la orden y actualiza su total (productos más empaque). */
     public static function fill(Order $order, array $built): void
     {
         $order->items()->delete();
         $order->items()->createMany($built['items']);
-        $order->update(['total' => $built['total']]);
+        $order->update(['total' => round($built['total'] + (float) $order->packaging_fee, 2)]);
     }
 
     /** Renglones del navegador a partir de una orden guardada (para editarla). */

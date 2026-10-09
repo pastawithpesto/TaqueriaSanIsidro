@@ -23,10 +23,20 @@ new #[Title('Ajustes')] class extends Component
 
     public string $new_password_confirmation = '';
 
+    public ?string $packaging_fee = '0';
+
     public function mount(): void
     {
         $this->name = Branding::name();
         $this->short_name = Branding::shortName();
+        $this->packaging_fee = Setting::value('packaging_fee', '0');
+    }
+
+    public function savePackaging(): void
+    {
+        $this->validate(['packaging_fee' => ['required', 'numeric', 'min:0', 'max:1000']], attributes: ['packaging_fee' => 'cobro por empaque']);
+        Setting::put('packaging_fee', (float) $this->packaging_fee > 0 ? (string) round((float) $this->packaging_fee, 2) : null);
+        $this->dispatch('toast', message: 'Cobro por empaque guardado');
     }
 
     public function saveBusiness(): void
@@ -146,6 +156,22 @@ new #[Title('Ajustes')] class extends Component
             @error('short_name') <p class="error">{{ $message }}</p> @enderror
         </div>
         <button class="btn-primary" wire:loading.attr="disabled">Guardar nombre</button>
+    </form>
+
+    {{-- Para llevar --}}
+    <form wire:submit="savePackaging" class="card space-y-4">
+        <div>
+            <h2 class="section-title">Para llevar</h2>
+            <p class="text-sm text-muted">Si cobras el desechable, se suma una vez a cada pedido para llevar. Déjalo en 0 si no lo cobras.</p>
+        </div>
+        <div class="flex items-end gap-3">
+            <div class="w-40">
+                <label class="label" for="packaging_fee">Cobro por empaque</label>
+                <x-money-input id="packaging_fee" wire:model="packaging_fee" />
+            </div>
+            <button class="btn-primary h-12" wire:loading.attr="disabled">Guardar</button>
+        </div>
+        @error('packaging_fee') <p class="error">{{ $message }}</p> @enderror
     </form>
 
     {{-- Contraseña --}}

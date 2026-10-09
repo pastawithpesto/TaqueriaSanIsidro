@@ -12,6 +12,8 @@ class DatabaseSeeder extends Seeder
         $this->call(ProductSeeder::class);
 
         if (app()->environment('local')) {
+            $this->call(DemoRecipesSeeder::class);
+
             User::firstOrCreate(
                 ['email' => 'admin@taqueria.test'],
                 ['name' => 'Admin', 'password' => 'password'],

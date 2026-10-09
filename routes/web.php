@@ -15,6 +15,7 @@ Route::middleware('auth')->group(function () {
     Route::livewire('/resumen', 'pages::resumen')->name('resumen');
     Route::livewire('/corte', 'pages::corte')->name('corte');
     Route::livewire('/pedidos', 'pages::pedidos')->name('pedidos');
+    Route::livewire('/cocina', 'pages::cocina')->name('cocina');
     Route::livewire('/ventas', 'pages::ventas')->name('ventas');
     Route::livewire('/gastos', 'pages::gastos')->name('gastos');
     Route::livewire('/productos', 'pages::productos')->name('productos');

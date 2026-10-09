@@ -4,9 +4,11 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\Setting;
 use App\Support\OrderBuilder;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Renderless;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -25,6 +27,12 @@ new #[Title('Vender')] class extends Component
     public array $lines = [];
 
     public ?string $label = null;
+
+    /** 'togo' para llevar o 'here' para comer aquí. */
+    public string $service = 'togo';
+
+    /** Hora de recogida (HH:MM) si el pedido es para más tarde. */
+    public ?string $pickupTime = null;
 
     public string $method = 'cash';
 
@@ -56,6 +64,8 @@ new #[Title('Vender')] class extends Component
 
         $this->lines = OrderBuilder::linesFrom($order);
         $this->label = $order->label;
+        $this->service = $order->service ?? 'togo';
+        $this->pickupTime = $order->pickup_at?->format('H:i');
         // Desde Pedidos, "Cobrar" abre directo el cuadro de cobro.
         $this->openPay = request()->boolean('cobrar');
     }
@@ -89,7 +99,40 @@ new #[Title('Vender')] class extends Component
             'without' => $p->ingredients->filter(fn ($i) => $i->pivot->removable)
                 ->map(fn ($i) => ['id' => $i->id, 'name' => $i->name])->values()->all(),
             'extras' => $p->extras->map(fn ($e) => ['id' => $e->id, 'name' => $e->name, 'price' => (float) $e->price])->values()->all(),
+            'soldOut' => $p->isSoldOut(),
         ]])->all();
+    }
+
+    #[Computed]
+    public function packagingFee(): float
+    {
+        return (float) Setting::value('packaging_fee', '0');
+    }
+
+    /** Marca o desmarca un producto como agotado por hoy. El navegador ya lo muestra; no hace falta volver a pintar. */
+    #[Renderless]
+    public function toggleSoldOut(int $id): void
+    {
+        $product = Product::findOrFail($id);
+        $product->update(['sold_out_on' => $product->isSoldOut() ? null : today()]);
+        unset($this->products, $this->catalog);
+    }
+
+    protected function pickupAt(): ?\Carbon\Carbon
+    {
+        if (! $this->pickupTime || ! preg_match('/^\d{2}:\d{2}$/', $this->pickupTime)) {
+            return null;
+        }
+
+        $at = today()->setTimeFromTimeString($this->pickupTime);
+
+        // Una hora que ya pasó hace rato (ej. 00:30 capturado a las 23:00) es para el día siguiente.
+        return $at->lt(now()->subHour()) ? $at->addDay() : $at;
+    }
+
+    protected function feeFor(string $service): float
+    {
+        return $service === 'togo' ? $this->packagingFee : 0.0;
     }
 
     protected function title(Order $order): string
@@ -115,10 +158,13 @@ new #[Title('Vender')] class extends Component
             $order->fill([
                 'status' => $status,
                 'label' => trim((string) $this->label) ?: null,
+                'service' => in_array($this->service, ['togo', 'here'], true) ? $this->service : null,
+                'packaging_fee' => $this->feeFor($this->service),
+                'pickup_at' => $this->pickupAt(),
                 'payment_method' => $paid ? $this->method : null,
                 'payment_reference' => $paid && $this->method !== 'cash' ? ($this->reference ?: null) : null,
                 'paid_at' => $paid ? now() : null,
-                'total' => $built['total'],
+                'total' => $built['total'] + $this->feeFor($this->service),
             ])->save();
 
             OrderBuilder::fill($order, $built);
@@ -129,8 +175,9 @@ new #[Title('Vender')] class extends Component
 
     protected function finish(): void
     {
-        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay');
+        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime');
         $this->method = 'cash';
+        $this->service = 'togo';
         unset($this->editing);
     }
 
@@ -147,7 +194,7 @@ new #[Title('Vender')] class extends Component
             return ['ok' => false, 'error' => 'El pedido está vacío.'];
         }
 
-        if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $built['total']) {
+        if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $built['total'] + $this->feeFor($this->service)) {
             return ['ok' => false, 'error' => 'El monto recibido no alcanza para el total.'];
         }
 
@@ -208,6 +255,9 @@ new #[Title('Vender')] class extends Component
     x-init="if (new URLSearchParams(location.search).has('cobrar')) { const u = new URL(location.href); u.searchParams.delete('cobrar'); history.replaceState(history.state, '', u) }"
     x-data="{
         catalog: @js($this->catalog),
+        fee: @js($this->packagingFee),
+        stock: false,
+        later: @js((bool) $pickupTime),
         category: '',
         sheet: @js($openPay),
         editor: null,
@@ -226,6 +276,15 @@ new #[Title('Vender')] class extends Component
             return a.product_id == b.product_id && s(a.without) === s(b.without) && s(a.extras) === s(b.extras) && (a.notes ?? '').trim().toLowerCase() === (b.notes ?? '').trim().toLowerCase();
         },
         qtyOf(pid) { return this.list().filter(l => l.product_id == pid).reduce((n, l) => n + l.qty, 0) },
+        tap(pid) {
+            if (this.stock) return this.toggleStock(pid);
+            if (this.catalog[pid]?.soldOut) return this.$dispatch('toast', { message: this.catalog[pid].name + ' está agotado hoy', type: 'error' });
+            this.add(pid);
+        },
+        toggleStock(pid) {
+            this.catalog[pid].soldOut = ! this.catalog[pid].soldOut;
+            $wire.toggleSoldOut(pid);
+        },
         add(pid) {
             const lines = this.list().map(l => ({ ...l }));
             const i = lines.findIndex(l => l.product_id == pid && this.isPlain(l));
@@ -263,7 +322,8 @@ new #[Title('Vender')] class extends Component
             };
         },
         count() { return this.list().reduce((n, l) => n + l.qty, 0) },
-        total() { return Math.round(this.list().reduce((t, l) => t + this.unit(l) * l.qty, 0) * 100) / 100 },
+        packaging() { return $wire.service === 'togo' ? this.fee : 0 },
+        total() { return Math.round((this.list().reduce((t, l) => t + this.unit(l) * l.qty, 0) + (this.count() ? this.packaging() : 0)) * 100) / 100 },
         change() {
             const r = $wire.received;
             if ($wire.method !== 'cash' || r === null || r === '' || isNaN(r)) return null;
@@ -309,9 +369,15 @@ new #[Title('Vender')] class extends Component
             @if ($this->editing)
                 <button type="button" wire:click="cancelEdit" class="btn">Salir</button>
             @else
-                <button type="button" x-show="count() > 0" x-cloak @click="confirmClear()" class="btn-quiet md:hidden">Vaciar</button>
+                <button type="button" x-show="count() > 0 && ! stock" x-cloak @click="confirmClear()" class="btn-quiet md:hidden">Vaciar</button>
+                <button type="button" @click="stock = ! stock" class="btn" :class="stock && '!bg-ink !text-bg !border-ink'">
+                    <x-icon name="eye-off" class="size-4" /> <span x-show="! stock">Agotados</span><span x-show="stock" x-cloak>Listo</span>
+                </button>
             @endif
         </x-slot:actions>
+        <p x-show="stock" x-cloak class="mb-3 rounded-xl bg-ink px-3 py-2.5 text-sm text-bg">
+            Toca los productos que se acabaron. Quedan marcados solo por hoy; mañana vuelven a estar disponibles.
+        </p>
         @if ($this->editing)
             <p class="mb-3 rounded-xl bg-surface/80 px-3 py-2 text-sm">
                 Editando <span class="font-semibold">{{ $this->editing->label }}</span>, por cobrar. Agrega o quita productos y guarda, o cóbralo.
@@ -348,8 +414,13 @@ new #[Title('Vender')] class extends Component
                         <div wire:key="p-{{ $product->id }}"
                              x-show="category === '' || category === @js($product->category)"
                              class="{{ $tint }} relative min-h-[8.25rem] rounded-2xl border-2 motion-safe:transition motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97]"
-                             :class="qtyOf({{ $product->id }}) > 0 ? 'border-chile shadow-[0_6px_16px_-8px_rgb(224_36_36/0.55)]' : 'border-transparent'">
-                            <button type="button" @click="add({{ $product->id }})" class="add absolute inset-0 w-full touch-manipulation rounded-2xl" aria-label="Agregar {{ $product->name }}"></button>
+                             :class="[
+                                 qtyOf({{ $product->id }}) > 0 ? 'border-chile shadow-[0_6px_16px_-8px_rgb(224_36_36/0.55)]' : 'border-transparent',
+                                 catalog[{{ $product->id }}].soldOut && 'grayscale opacity-55',
+                                 stock && 'ring-2 ring-ink/25 ring-offset-2 ring-offset-bg',
+                             ]">
+                            <button type="button" @click="tap({{ $product->id }})" class="add absolute inset-0 w-full touch-manipulation rounded-2xl" aria-label="Agregar {{ $product->name }}"></button>
+                            <span x-show="catalog[{{ $product->id }}].soldOut" x-cloak class="pointer-events-none absolute top-2.5 right-2.5 z-10 rounded-md bg-ink px-2 py-0.5 text-xs font-bold text-bg">Agotado</span>
                             <div class="pointer-events-none relative flex h-full min-h-[8.25rem] flex-col justify-between gap-3 p-3.5">
                                 <p class="pr-10 font-display {{ mb_strlen($product->name) > 10 ? 'text-[1.25rem]' : 'text-[1.4rem]' }} leading-[0.95] font-bold hyphens-auto" lang="es">{{ $product->name }}</p>
                                 <span class="num inline-flex w-fit items-center rounded-lg bg-ink px-2.5 py-0.5 text-xl font-bold text-bg">{{ money($product->price) }}</span>
@@ -433,6 +504,27 @@ new #[Title('Vender')] class extends Component
                     <input id="label" type="text" x-model="$wire.label" maxlength="60" class="input" placeholder="Ej. camioneta negra, Juan, mesa 2" autocomplete="off">
                 </div>
 
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <p class="label">Servicio</p>
+                        <div class="segmented" role="group" aria-label="Servicio">
+                            <button type="button" @click="$wire.service = 'togo'" :aria-pressed="$wire.service === 'togo'">Para llevar</button>
+                            <button type="button" @click="$wire.service = 'here'" :aria-pressed="$wire.service === 'here'">Aquí</button>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="label">¿Cuándo?</p>
+                        <div class="segmented" role="group" aria-label="Cuándo">
+                            <button type="button" @click="later = false; $wire.pickupTime = null" :aria-pressed="! later">Ahora</button>
+                            <button type="button" @click="later = true; $nextTick(() => $refs.pickup?.focus())" :aria-pressed="later">Más tarde</button>
+                        </div>
+                    </div>
+                </div>
+                <div x-show="later" x-cloak>
+                    <label class="label" for="pickup">Hora en que lo recogen</label>
+                    <input id="pickup" x-ref="pickup" type="time" x-model="$wire.pickupTime" class="input" step="300">
+                </div>
+
                 <div>
                     <div class="mb-1 flex items-baseline justify-between">
                         <p class="label !mb-0">Productos</p>
@@ -440,6 +532,11 @@ new #[Title('Vender')] class extends Component
                     </div>
                     @include('partials.order-lines')
                 </div>
+
+                <p x-show="packaging() > 0" x-cloak class="-mt-2 flex justify-between border-t border-line pt-2.5 text-[15px]">
+                    <span class="text-muted">Empaque para llevar</span>
+                    <span class="num text-lg font-semibold" x-text="fmt(packaging())"></span>
+                </p>
 
                 <div class="flex items-end justify-between rounded-2xl bg-sunken px-4 py-3">
                     <span class="text-sm font-semibold text-muted" x-text="count() === 1 ? '1 producto' : count() + ' productos'"></span>

@@ -8,6 +8,7 @@
     ];
     $more = [
         ['resumen', 'Resumen', 'chart'],
+        ['cocina', 'Pantalla de cocina', 'flame'],
         ['corte', 'Corte de caja', 'banknote'],
         ['productos', 'Productos', 'tag'],
         ['insumos', 'Insumos', 'package'],

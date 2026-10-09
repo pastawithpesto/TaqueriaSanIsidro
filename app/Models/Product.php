@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'category', 'price', 'active', 'sort_order'])]
+#[Fillable(['name', 'category', 'price', 'active', 'sold_out_on', 'sort_order'])]
 class Product extends Model
 {
     protected function casts(): array
@@ -15,12 +15,18 @@ class Product extends Model
         return [
             'price' => 'decimal:2',
             'active' => 'boolean',
+            'sold_out_on' => 'date',
         ];
     }
 
     public function ingredients(): BelongsToMany
     {
         return $this->belongsToMany(Ingredient::class, 'product_ingredient')->withPivot('quantity', 'removable');
+    }
+
+    public function isSoldOut(): bool
+    {
+        return $this->sold_out_on?->isToday() ?? false;
     }
 
     public function extras(): HasMany

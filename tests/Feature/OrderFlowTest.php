@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -171,5 +172,95 @@ class OrderFlowTest extends TestCase
         $this->assertSame(['Extra queso', 'Aguacate'], $extras->pluck('name')->all());
         $this->assertSame($existing->id, $extras[0]->id);
         $this->assertSame('12.00', $extras[0]->price);
+    }
+
+    public function test_sold_out_lasts_only_for_today(): void
+    {
+        Livewire::test('pages::vender')->call('toggleSoldOut', $this->torta->id);
+        $this->assertTrue($this->torta->fresh()->isSoldOut());
+
+        $this->travel(1)->days();
+        $this->assertFalse($this->torta->fresh()->isSoldOut());
+    }
+
+    public function test_to_go_orders_add_the_packaging_fee(): void
+    {
+        Setting::put('packaging_fee', '5');
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 2]])
+            ->set('service', 'togo')
+            ->call('charge');
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->set('service', 'here')
+            ->call('charge');
+
+        [$togo, $here] = Order::orderBy('id')->get()->all();
+        $this->assertSame('5.00', $togo->packaging_fee);
+        $this->assertSame('83.00', $togo->total);
+        $this->assertSame('0.00', $here->packaging_fee);
+        $this->assertSame('39.00', $here->total);
+        $this->assertSame('here', $here->service);
+    }
+
+    public function test_pickup_orders_are_sorted_by_pickup_time(): void
+    {
+        $this->travelTo(today()->setTime(13, 0));
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->set('label', 'Recoge tarde')
+            ->set('pickupTime', '15:30')
+            ->call('saveOpen');
+
+        $this->travel(5)->minutes();
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->set('label', 'Ahorita')
+            ->call('saveOpen');
+
+        $this->assertSame('15:30', Order::where('label', 'Recoge tarde')->sole()->pickup_at->format('H:i'));
+
+        $queue = Livewire::test('pages::pedidos')->get('pending');
+        $this->assertSame(['Ahorita', 'Recoge tarde'], $queue->pluck('label')->all());
+    }
+
+    public function test_kitchen_marks_orders_ready(): void
+    {
+        $order = Order::create(['daily_number' => 1, 'status' => 'paid', 'payment_method' => 'cash', 'label' => 'Carro rojo', 'total' => 39, 'sold_at' => now()]);
+
+        Livewire::test('pages::cocina')
+            ->assertSee('Carro rojo')
+            ->call('markReady', $order->id)
+            ->assertSet('queue', fn ($q) => $q->isEmpty());
+
+        $this->assertNotNull($order->fresh()->ready_at);
+        $this->assertSame([$order->id], Order::pending()->pluck('id')->all());
+
+        Livewire::test('pages::cocina')->call('unready', $order->id);
+        $this->assertNull($order->fresh()->ready_at);
+    }
+
+    public function test_packaging_fee_setting_is_saved(): void
+    {
+        Livewire::test('pages::ajustes')->set('packaging_fee', '4.5')->call('savePackaging')->assertHasNoErrors();
+
+        Setting::flush();
+        $this->assertSame('4.5', Setting::value('packaging_fee'));
+    }
+
+    public function test_pickup_time_that_already_passed_means_tomorrow(): void
+    {
+        $this->travelTo(today()->setTime(23, 0));
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->set('label', 'Trasnochado')
+            ->set('pickupTime', '00:30')
+            ->call('saveOpen');
+
+        $this->assertTrue(Order::sole()->pickup_at->isTomorrow());
     }
 }
