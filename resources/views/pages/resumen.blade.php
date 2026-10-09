@@ -182,14 +182,14 @@ new #[Title('Resumen')] class extends Component
 
 <div>
     <x-page-header title="Resumen">
-        <div class="segmented md:max-w-md" role="group" aria-label="Periodo">
+        <div class="segmented md:max-w-md" role="group" aria-label="Periodo" x-data="{ range: $wire.$entangle('range', true) }">
             @foreach ($this::RANGES as $key => $label)
-                <button type="button" wire:click="$set('range', '{{ $key }}')" aria-pressed="{{ $range === $key ? 'true' : 'false' }}">{{ $label }}</button>
+                <button type="button" @click="range = '{{ $key }}'" :aria-pressed="range === '{{ $key }}'">{{ $label }}</button>
             @endforeach
         </div>
     </x-page-header>
 
-    <div class="space-y-5">
+    <div class="space-y-5 transition-opacity duration-200" wire:loading.class="pointer-events-none animate-pulse opacity-50" wire:target="range">
         @if ($pending)
             <section class="card !p-5">
                 <h2 class="section-title">Para empezar</h2>

@@ -102,10 +102,10 @@ new #[Title('Insumos')] class extends Component
 };
 ?>
 
-<div>
+<div x-data="{ sheet: $wire.$entangle('showForm') }">
     <x-page-header title="Insumos">
         <x-slot:actions>
-            <button type="button" wire:click="create" class="btn-primary"><x-icon name="plus" class="size-4" /> Insumo</button>
+            <button type="button" @click="sheet = true" class="btn-primary"><x-icon name="plus" class="size-4" /> Insumo</button>
         </x-slot:actions>
         @if ($this->hasAny)
             <div class="relative">
@@ -119,7 +119,7 @@ new #[Title('Insumos')] class extends Component
     @if (! $this->hasAny)
         <x-empty icon="package" title="Empieza por tus insumos">
             Son lo que compras para cocinar: carne, tortillas, cebolla, cilantro. Con su costo la app calcula cuánto ganas por cada taco.
-            <x-slot:action><button type="button" wire:click="create" class="btn-primary">Agregar el primer insumo</button></x-slot:action>
+            <x-slot:action><button type="button" @click="sheet = true" class="btn-primary">Agregar el primer insumo</button></x-slot:action>
         </x-empty>
     @elseif ($this->ingredients->isEmpty())
         <p class="py-8 text-center text-sm text-muted">Ningún insumo coincide con "{{ $search }}".</p>
@@ -127,7 +127,7 @@ new #[Title('Insumos')] class extends Component
         <ul class="list">
             @foreach ($this->ingredients as $i)
                 <li wire:key="i-{{ $i->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
-                    <button type="button" wire:click="edit({{ $i->id }})" class="min-w-0 flex-1 text-left">
+                    <button type="button" @click="sheet = true; $wire.edit({{ $i->id }})" class="min-w-0 flex-1 text-left">
                         <span @class(['block truncate font-semibold', 'text-muted' => ! $i->active])>{{ $i->name }}</span>
                         <span class="mt-0.5 flex items-center gap-2 text-sm text-muted">
                             @unless ($i->active) <span class="badge bg-sunken text-muted">Inactivo</span> @endunless
@@ -141,10 +141,10 @@ new #[Title('Insumos')] class extends Component
                     <div x-data="{ menu: false }" class="relative">
                         <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $i->name }}"><x-icon name="more" /></button>
                         <div x-show="menu" x-cloak x-transition.origin.top.right class="menu" @click="menu = false">
-                            <button type="button" wire:click="edit({{ $i->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
+                            <button type="button" @click="sheet = true; $wire.edit({{ $i->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
                             <button type="button" wire:click="toggle({{ $i->id }})"><x-icon :name="$i->active ? 'eye-off' : 'eye'" class="size-4 text-muted" /> {{ $i->active ? 'Desactivar' : 'Activar' }}</button>
                             @if ($i->products_count === 0)
-                                <button type="button" wire:click="delete({{ $i->id }})" wire:confirm="¿Borrar este insumo?" class="text-chile"><x-icon name="trash" class="size-4" /> Borrar</button>
+                                <button type="button" class="text-chile" @click="if (await $store.confirm.ask({ title: @js('¿Borrar '.$i->name.'?'), message: 'Las compras ya registradas se conservan.', action: 'Borrar' })) $wire.delete({{ $i->id }})"><x-icon name="trash" class="size-4" /> Borrar</button>
                             @endif
                         </div>
                     </div>
@@ -155,12 +155,15 @@ new #[Title('Insumos')] class extends Component
     @endif
     </div>
 
-    @if ($showForm)
-        <x-sheet :title="$editingId ? 'Editar insumo' : 'Nuevo insumo'">
-            <form wire:submit="save" id="ingredient-form" class="space-y-4">
+        <x-sheet :title="$editingId ? 'Editar insumo' : 'Nuevo insumo'" open="sheet" dismiss="sheet = false; $wire.cancel()">
+            <div wire:loading.block wire:target="edit" class="space-y-4" aria-hidden="true">
+                <div class="h-12 animate-pulse rounded-xl bg-sunken"></div>
+                <div class="grid grid-cols-2 gap-3"><div class="h-12 animate-pulse rounded-xl bg-sunken"></div><div class="h-12 animate-pulse rounded-xl bg-sunken"></div></div>
+            </div>
+            <form wire:submit="save" id="ingredient-form" class="space-y-4" wire:loading.remove wire:target="edit">
                 <div>
                     <label class="label" for="name">Nombre</label>
-                    <input id="name" type="text" wire:model="name" class="input" placeholder="Bistec, tortilla, cilantro" autofocus>
+                    <input id="name" type="text" wire:model="name" class="input" placeholder="Bistec, tortilla, cilantro">
                     @error('name') <p class="error">{{ $message }}</p> @enderror
                 </div>
                 <div class="grid grid-cols-2 gap-3">
@@ -173,7 +176,7 @@ new #[Title('Insumos')] class extends Component
                         </select>
                     </div>
                     <div>
-                        <label class="label" for="cost">Costo por {{ $unit }}</label>
+                        <label class="label" for="cost" x-text="'Costo por ' + $wire.unit">Costo por {{ $unit }}</label>
                         <x-money-input id="cost" step="any" wire:model="cost_per_unit" />
                         @error('cost_per_unit') <p class="error">{{ $message }}</p> @enderror
                     </div>
@@ -181,8 +184,8 @@ new #[Title('Insumos')] class extends Component
                 <p class="hint">Si no sabes el costo exacto, pon uno aproximado. Se corrige solo cuando registres la compra.</p>
             </form>
             <x-slot:footer>
-                <button type="submit" form="ingredient-form" wire:loading.attr="disabled" class="btn-primary btn-lg w-full">Guardar insumo</button>
+                <button type="submit" form="ingredient-form" wire:loading.attr="disabled" wire:target="save,edit" class="btn-primary btn-lg w-full">Guardar insumo</button>
             </x-slot:footer>
         </x-sheet>
-    @endif
+
 </div>

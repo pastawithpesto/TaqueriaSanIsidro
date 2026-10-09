@@ -127,7 +127,7 @@ new #[Title('Ajustes')] class extends Component
         </div>
 
         @if (Branding::hasCustomLogo() && ! $logo)
-            <button type="button" wire:click="resetLogo" wire:confirm="¿Volver al logo original?" class="btn-quiet -ml-2.5">Volver al logo original</button>
+            <button type="button" class="btn-quiet -ml-2.5" @click="if (await $store.confirm.ask({ title: '¿Volver al logo original?', message: 'Se borrará el logo que subiste.', action: 'Restaurar' })) $wire.resetLogo()">Volver al logo original</button>
         @endif
     </section>
 

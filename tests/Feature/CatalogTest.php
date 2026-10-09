@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Expense;
 use App\Models\Ingredient;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -97,26 +98,16 @@ class CatalogTest extends TestCase
             ->set('name', 'Taco de bistec')
             ->set('category', 'Tacos')
             ->set('price', '20')
-            ->set('newIngredient', $meat->id)->set('newQuantity', '0.05')->call('addIngredient')
-            ->set('newIngredient', $tortilla->id)->set('newQuantity', '2')->call('addIngredient')
-            ->assertSet('formCost', 13.0)
+            ->set('recipe', [
+                ['ingredient_id' => $meat->id, 'quantity' => '0.05'],
+                ['ingredient_id' => $tortilla->id, 'quantity' => '2'],
+            ])
             ->call('save')
             ->assertHasNoErrors();
 
         $product = Product::with('ingredients')->sole();
         $this->assertCount(2, $product->ingredients);
         $this->assertEquals(13.0, $product->unitCost());
-    }
-
-    public function test_adding_same_ingredient_twice_replaces_quantity(): void
-    {
-        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
-
-        Livewire::test('pages::productos')
-            ->call('create')
-            ->set('newIngredient', $meat->id)->set('newQuantity', '0.05')->call('addIngredient')
-            ->set('newIngredient', $meat->id)->set('newQuantity', '0.08')->call('addIngredient')
-            ->assertCount('recipe', 1);
     }
 
     public function test_duplicate_copies_product_and_recipe(): void
@@ -138,7 +129,6 @@ class CatalogTest extends TestCase
     public function test_expense_can_be_marked_as_not_from_cash(): void
     {
         Livewire::test('pages::gastos')
-            ->call('create')
             ->set('category', 'equipment')
             ->set('total', '500')
             ->set('from_cash', false)
@@ -146,5 +136,72 @@ class CatalogTest extends TestCase
             ->assertHasNoErrors();
 
         $this->assertFalse(Expense::sole()->from_cash);
+    }
+
+    public function test_recipe_quantities_must_be_positive(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
+
+        Livewire::test('pages::productos')
+            ->call('create')
+            ->set('name', 'Taco')
+            ->set('price', '20')
+            ->set('recipe', [['ingredient_id' => $meat->id, 'quantity' => '0']])
+            ->call('save')
+            ->assertHasErrors('recipe.0.quantity');
+    }
+
+    public function test_product_can_be_deleted_and_past_sales_keep_their_name(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $order = Order::create(['status' => 'paid', 'payment_method' => 'cash', 'total' => 20, 'sold_at' => now()]);
+        $order->items()->create(['product_id' => $taco->id, 'product_name' => 'Taco', 'quantity' => 1, 'unit_price' => 20, 'subtotal' => 20]);
+
+        Livewire::test('pages::productos')->call('delete', $taco->id);
+
+        $this->assertSame(0, Product::count());
+        $this->assertSame('Taco', $order->items()->sole()->product_name);
+    }
+
+    public function test_expense_can_be_edited(): void
+    {
+        $expense = Expense::create(['category' => 'gas', 'total' => 400, 'spent_on' => today()]);
+
+        Livewire::test('pages::gastos')
+            ->call('edit', $expense->id)
+            ->assertSet('total', '400')
+            ->set('total', '450')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, Expense::count());
+        $this->assertSame('450.00', $expense->fresh()->total);
+    }
+
+    public function test_editing_an_old_purchase_does_not_override_the_latest_cost(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 0]);
+        $old = Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 5, 'total' => 900, 'spent_on' => today()->subDays(3)]);
+        Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 5, 'total' => 1000, 'spent_on' => today()]);
+        $meat->update(['cost_per_unit' => 200]);
+
+        Livewire::test('pages::gastos')->call('edit', $old->id)->set('total', '800')->call('save');
+
+        $this->assertSame('200.0000', $meat->fresh()->cost_per_unit);
+    }
+
+    public function test_switching_away_from_ingredients_clears_the_ingredient(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg']);
+
+        Livewire::test('pages::gastos')
+            ->set('ingredient_id', $meat->id)
+            ->set('quantity', '2')
+            ->set('category', 'gas')
+            ->set('total', '300')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertNull(Expense::sole()->ingredient_id);
     }
 }

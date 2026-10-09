@@ -4,52 +4,70 @@
 @source '../../storage/framework/views/*.php';
 
 /*
- * Identidad: lona de taquería. Rojo chile para la acción principal, limón
- * para el precio, tinta para el texto. Verde y ámbar solo comunican estado.
+ * Paleta del logo de Taquería San Isidro: rojo del aro, degradado amarillo a
+ * naranja, café de las letras y crema del fondo. Verde solo para estados.
  * Radios: hojas 24px, tarjetas 16px, controles 12px, chips redondos.
  */
 @theme {
     --font-sans: 'Barlow', ui-sans-serif, system-ui, sans-serif;
     --font-display: 'Barlow Condensed', 'Barlow', ui-sans-serif, system-ui, sans-serif;
 
-    --color-bg: #f4f3f0;
+    --color-bg: #fdf5e8;
     --color-surface: #ffffff;
-    --color-sunken: #ebe9e5;
-    --color-ink: #1c1816;
-    --color-muted: #6a625d;
-    --color-line: #e1ded8;
+    --color-sunken: #f8ead3;
+    --color-ink: #4e2c11;
+    --color-muted: #8a6a4f;
+    --color-line: #f0dfc4;
 
-    --color-chile: #c62a1d;
-    --color-chile-strong: #a91f14;
-    --color-chile-soft: #fbe8e5;
-    --color-limon: #f6c416;
-    --color-limon-soft: #fdf1c4;
+    /* Rojo de acción (un poco más profundo que el del logo para que el texto blanco se lea bien) */
+    --color-chile: #e02424;
+    --color-chile-strong: #c21b1b;
+    --color-chile-soft: #ffe2dc;
+    --color-rojo: #ff3131;
+    --color-limon: #ffda58;
+    --color-limon-soft: #fff1c2;
+    --color-naranja: #fe964d;
+    --color-naranja-soft: #ffe6d2;
+    --color-crema: #f3d3a0;
     --color-salsa: #17803d;
     --color-salsa-soft: #e0f2e6;
 
-    --color-on-limon: #1c1816;
-    --color-sales: #1f5fa8;
-    --color-spend: #b87800;
+    --color-on-limon: #4e2c11;
+    --color-sales: #e02424;
+    --color-spend: #e3a21a;
+
+    --color-tint-1: #fff1c2;
+    --color-tint-2: #ffe6d2;
+    --color-tint-3: #ffe2dc;
+    --color-tint-4: #f9e7c5;
+    --color-tint-5: #fde4d4;
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --color-bg: #131010;
-        --color-surface: #1d1918;
-        --color-sunken: #282322;
-        --color-ink: #f3eeea;
-        --color-muted: #a8a09a;
-        --color-line: #332d2b;
+        --color-bg: #1a110a;
+        --color-surface: #25180e;
+        --color-sunken: #332217;
+        --color-ink: #fbebd3;
+        --color-muted: #c2a68a;
+        --color-line: #3f2c1e;
 
-        --color-chile: #d9392b;
-        --color-chile-strong: #e5584b;
-        --color-chile-soft: #3a1c19;
-        --color-limon-soft: #3a3210;
+        --color-chile: #e02424;
+        --color-chile-strong: #f04438;
+        --color-chile-soft: #4a1a14;
+        --color-limon-soft: #3d3112;
+        --color-naranja-soft: #40261a;
         --color-salsa: #4cc07a;
         --color-salsa-soft: #153322;
 
-        --color-sales: #4a8ad8;
-        --color-spend: #bf8410;
+        --color-sales: #d63a2f;
+        --color-spend: #e3a21a;
+
+        --color-tint-1: #3a2e10;
+        --color-tint-2: #3f2616;
+        --color-tint-3: #401d17;
+        --color-tint-4: #382a13;
+        --color-tint-5: #3d2418;
     }
 }
 
@@ -97,6 +115,14 @@ body {
     font-family: var(--font-display);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.005em;
+}
+
+@utility bg-brand {
+    background: linear-gradient(105deg, #ffda58 0%, #ffbc53 55%, #fe964d 100%);
+
+    @media (prefers-color-scheme: dark) {
+        background: linear-gradient(105deg, #3d2e0c 0%, #432812 55%, #4a2210 100%);
+    }
 }
 
 @utility scroll-fade {
@@ -158,7 +184,7 @@ body {
 
     /* Control segmentado */
     .segmented {
-        @apply grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-sunken p-1;
+        @apply grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-ink/8 p-1;
     }
     .segmented > button {
         @apply min-h-10 rounded-lg px-2 text-sm font-semibold whitespace-nowrap text-muted select-none motion-safe:transition;

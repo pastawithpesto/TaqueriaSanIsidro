@@ -19,8 +19,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f3f0">
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131010">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd657">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#3d2e0c">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -40,9 +40,9 @@
         {{-- Barra lateral (escritorio) --}}
         <div class="hidden border-r border-line bg-surface md:block">
             <aside class="sticky top-0 flex h-dvh flex-col p-4">
-                <a href="{{ route('vender') }}" wire:navigate class="mb-7 flex items-center gap-3 px-1.5 pt-2">
-                    <x-logo class="size-12" :res="192" />
-                    <span class="font-display text-xl leading-[1.05] font-bold text-balance">{{ Branding::name() }}</span>
+                <a href="{{ route('vender') }}" wire:navigate class="bg-brand mb-6 flex items-center gap-3 rounded-2xl p-3">
+                    <x-logo class="size-12 ring-2 ring-white/70" :res="192" />
+                    <span class="font-display text-xl leading-[1.05] font-bold text-balance text-ink">{{ Branding::name() }}</span>
                 </a>
                 <nav class="flex flex-col gap-0.5" aria-label="Principal">
                     @foreach ($main as [$route, $label, $icon])
@@ -78,7 +78,7 @@
                 <a href="{{ route($route) }}" wire:navigate
                    class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $active ? 'text-ink' : 'text-muted' }}"
                    @if ($active) aria-current="page" @endif>
-                    <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-chile-soft text-chile' : '' }}">
+                    <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-chile text-white' : '' }}">
                         <x-icon :name="$icon" class="size-[22px]" />
                     </span>
                     {{ $label }}
@@ -86,7 +86,7 @@
             @endforeach
             <button type="button" @click="more = true"
                     class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $moreActive ? 'text-ink' : 'text-muted' }}">
-                <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $moreActive ? 'bg-chile-soft text-chile' : '' }}">
+                <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $moreActive ? 'bg-chile text-white' : '' }}">
                     <x-icon name="more" class="size-[22px]" />
                 </span>
                 Más
@@ -129,19 +129,43 @@
             items: [],
             push(d) {
                 const id = Math.random();
-                this.items.push({ id, message: d.message });
-                setTimeout(() => this.items = this.items.filter(i => i.id !== id), d.ms ?? 3000);
+                this.items.push({ id, message: d.message, type: d.type ?? 'success' });
+                setTimeout(() => this.items = this.items.filter(i => i.id !== id), d.ms ?? (d.type === 'error' ? 5000 : 3000));
             },
          }"
          @toast.window="push($event.detail)"
-         class="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[60] flex flex-col items-center gap-2 px-4 md:bottom-6"
+         class="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[90] flex flex-col items-center gap-2 px-4 md:bottom-6"
          aria-live="polite">
         <template x-for="t in items" :key="t.id">
-            <div class="sheet-in pointer-events-auto flex items-center gap-2.5 rounded-xl bg-ink py-3 pr-4 pl-3 text-sm font-semibold text-bg shadow-xl">
-                <x-icon name="check" class="size-4 text-salsa" />
+            <div class="sheet-in pointer-events-auto flex max-w-sm items-center gap-2.5 rounded-xl py-3 pr-4 pl-3 text-sm font-semibold shadow-xl"
+                 :class="t.type === 'error' ? 'bg-chile text-white' : 'bg-ink text-bg'">
+                <span x-show="t.type !== 'error'"><x-icon name="check" class="size-4 text-salsa" /></span>
+                <span x-show="t.type === 'error'"><x-icon name="alert" class="size-4" /></span>
                 <span x-text="t.message"></span>
             </div>
         </template>
+    </div>
+
+    {{-- Confirmación de acciones importantes --}}
+    <div x-data x-show="$store.confirm.open" x-cloak
+         @keydown.escape.window="$store.confirm.open && $store.confirm.answer(false)"
+         class="fixed inset-0 z-[80] flex items-end justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center"
+         role="alertdialog" aria-modal="true" :aria-label="$store.confirm.title">
+        <div class="absolute inset-0 bg-black/55" @click="$store.confirm.answer(false)"
+             x-show="$store.confirm.open" x-transition.opacity.duration.150ms></div>
+        <div class="relative w-full max-w-sm rounded-3xl bg-surface p-5 shadow-2xl"
+             x-show="$store.confirm.open" x-trap.noscroll="$store.confirm.open"
+             x-transition:enter="transition duration-200 ease-out" x-transition:enter-start="translate-y-4 scale-[0.98] opacity-0"
+             x-transition:leave="transition duration-100 ease-in" x-transition:leave-end="opacity-0">
+            <h2 class="section-title !text-2xl" x-text="$store.confirm.title"></h2>
+            <p class="mt-1.5 text-[15px] text-muted" x-show="$store.confirm.message" x-text="$store.confirm.message"></p>
+            <div class="mt-5 grid grid-cols-2 gap-2">
+                <button type="button" class="btn btn-lg" @click="$store.confirm.answer(false)" x-text="$store.confirm.cancel"></button>
+                <button type="button" class="btn-lg inline-flex items-center justify-center rounded-2xl px-4 font-semibold text-white"
+                        :class="$store.confirm.danger ? 'bg-chile hover:bg-chile-strong' : 'bg-ink !text-bg'"
+                        @click="$store.confirm.answer(true)" x-text="$store.confirm.action"></button>
+            </div>
+        </div>
     </div>
 
     @livewireScripts

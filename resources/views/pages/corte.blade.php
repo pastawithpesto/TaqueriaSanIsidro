@@ -19,6 +19,13 @@ new #[Title('Corte de caja')] class extends Component
 
     public ?string $notes = null;
 
+    /** Totales del día; el navegador los usa para calcular al instante. */
+    public float $cashSales = 0;
+
+    public float $otherSales = 0;
+
+    public float $cashExpenses = 0;
+
     public function mount(): void
     {
         $this->date = today()->toDateString();
@@ -30,15 +37,12 @@ new #[Title('Corte de caja')] class extends Component
         $this->loadClose();
     }
 
-    public function shift(int $days): void
-    {
-        $this->date = $this->day()->addDays($days)->toDateString();
-        $this->loadClose();
-    }
-
     /** Si ya hay corte guardado para el día, lo muestra; si no, hereda el fondo del anterior. */
     protected function loadClose(): void
     {
+        $this->loadTotals();
+        unset($this->saved);
+
         $saved = CashClose::whereDate('closed_on', $this->day())->first();
 
         if ($saved) {
@@ -88,32 +92,14 @@ new #[Title('Corte de caja')] class extends Component
         return CashClose::whereDate('closed_on', $this->day())->first();
     }
 
-    #[Computed]
-    public function cashSales(): float
+    protected function loadTotals(): void
     {
         $day = $this->day();
+        $paid = Order::where('status', OrderStatus::Paid)->whereBetween('sold_at', [$day, $day->endOfDay()]);
 
-        return (float) Order::where('status', OrderStatus::Paid)
-            ->where('payment_method', 'cash')
-            ->whereBetween('sold_at', [$day, $day->endOfDay()])
-            ->sum('total');
-    }
-
-    #[Computed]
-    public function otherSales(): float
-    {
-        $day = $this->day();
-
-        return (float) Order::where('status', OrderStatus::Paid)
-            ->where('payment_method', '!=', 'cash')
-            ->whereBetween('sold_at', [$day, $day->endOfDay()])
-            ->sum('total');
-    }
-
-    #[Computed]
-    public function cashExpenses(): float
-    {
-        return (float) Expense::whereDate('spent_on', $this->day())->where('from_cash', true)->sum('total');
+        $this->cashSales = (float) (clone $paid)->where('payment_method', 'cash')->sum('total');
+        $this->otherSales = (float) (clone $paid)->where('payment_method', '!=', 'cash')->sum('total');
+        $this->cashExpenses = (float) Expense::whereDate('spent_on', $day)->where('from_cash', true)->sum('total');
     }
 
     #[Computed]
@@ -159,14 +145,20 @@ new #[Title('Corte de caja')] class extends Component
 };
 ?>
 
-@php
-    $day = \Carbon\CarbonImmutable::parse($date);
-    $diff = $this->difference;
-@endphp
-
-<div>
+<div x-data="{
+        get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales - $wire.cashExpenses) * 100) / 100 },
+        get diff() {
+            if ($wire.counted === null || $wire.counted === '' || isNaN($wire.counted)) return null;
+            return Math.round((Number($wire.counted) - this.expected) * 100) / 100;
+        },
+        fmt(n) {
+            n = Math.round(n * 100) / 100;
+            const whole = Math.abs(n % 1) < 0.005;
+            return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(n);
+        },
+     }">
     <x-page-header title="Corte de caja">
-        <x-date-nav :label="$this->dayLabel" :detail="$day->translatedFormat('j M')" :max="today()->toDateString()" :at-max="$day->gte(today())" />
+        <x-date-nav :max="today()->toDateString()" />
     </x-page-header>
 
     <div class="mx-auto max-w-xl space-y-4">
@@ -177,63 +169,57 @@ new #[Title('Corte de caja')] class extends Component
                         <label for="opening" class="font-semibold">Fondo inicial</label>
                         <p class="text-sm text-muted">Con lo que abriste la caja</p>
                     </dt>
-                    <dd class="w-36"><x-money-input id="opening" wire:model.live.debounce.300ms="opening" class="!min-h-11 text-right !text-lg" /></dd>
+                    <dd class="w-36"><x-money-input id="opening" wire:model="opening" class="!min-h-11 text-right !text-lg" /></dd>
                 </div>
                 <div class="flex items-center justify-between px-4 py-3">
                     <dt class="text-muted">Ventas en efectivo</dt>
-                    <dd class="num text-xl font-bold">{{ $this->cashSales > 0 ? '+' : '' }}{{ money($this->cashSales) }}</dd>
+                    <dd class="num text-xl font-bold" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ $cashSales > 0 ? '+' : '' }}{{ money($cashSales) }}</dd>
                 </div>
                 <div class="flex items-center justify-between px-4 py-3">
                     <dt class="text-muted">Gastos pagados de la caja</dt>
-                    <dd class="num text-xl font-bold">{{ $this->cashExpenses > 0 ? '−'.money($this->cashExpenses) : money(0) }}</dd>
+                    <dd class="num text-xl font-bold" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ $cashExpenses > 0 ? '−'.money($cashExpenses) : money(0) }}</dd>
                 </div>
                 <div class="flex items-end justify-between bg-sunken/60 px-4 py-4">
                     <dt class="font-semibold">Debe haber en caja</dt>
-                    <dd class="num text-[2.5rem] leading-none font-bold">{{ money($this->expected) }}</dd>
+                    <dd class="num text-[2.5rem] leading-none font-bold" x-text="fmt(expected)" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ money($this->expected) }}</dd>
                 </div>
             </dl>
             @error('opening') <p class="error px-4 pb-3">{{ $message }}</p> @enderror
         </section>
 
-        @if ($this->otherSales > 0)
+        @if ($otherSales > 0)
             <p class="flex gap-2 px-1 text-sm text-muted">
                 <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
-                <span>Además se cobraron {{ money($this->otherSales) }} por transferencia o tarjeta. Ese dinero no entra a la caja.</span>
+                <span>Además se cobraron {{ money($otherSales) }} por transferencia o tarjeta. Ese dinero no entra a la caja.</span>
             </p>
         @endif
 
         <section class="card space-y-4 !p-5">
             <div>
                 <label class="label" for="counted">Efectivo contado</label>
-                <x-money-input id="counted" wire:model.live.debounce.300ms="counted" placeholder="0" class="!min-h-14 !text-2xl" />
+                <x-money-input id="counted" wire:model="counted" placeholder="0" class="!min-h-14 !text-2xl" />
                 <p class="hint">Cuenta billetes y monedas al cerrar.</p>
                 @error('counted') <p class="error">{{ $message }}</p> @enderror
             </div>
 
-            @if ($diff !== null)
-                <div @class([
-                    'flex items-center justify-between gap-3 rounded-xl px-4 py-3.5',
-                    'bg-salsa-soft text-salsa' => abs($diff) < 0.005,
-                    'bg-limon-soft text-ink' => $diff >= 0.005,
-                    'bg-chile-soft text-chile' => $diff <= -0.005,
-                ])>
-                    <span class="flex items-center gap-2 text-sm font-bold">
-                        <x-icon :name="abs($diff) < 0.005 ? 'check' : 'alert'" class="size-5" />
-                        {{ abs($diff) < 0.005 ? 'La caja cuadra' : ($diff > 0 ? 'Sobra dinero' : 'Falta dinero') }}
-                    </span>
-                    @if (abs($diff) >= 0.005)
-                        <span class="num text-[2rem] leading-none font-bold">{{ money(abs($diff)) }}</span>
-                    @endif
-                </div>
-            @endif
+            <div x-show="diff !== null" x-cloak class="flex items-center justify-between gap-3 rounded-xl px-4 py-3.5"
+                 :class="Math.abs(diff) < 0.005 ? 'bg-salsa-soft text-salsa' : (diff > 0 ? 'bg-limon-soft text-ink' : 'bg-chile-soft text-chile')">
+                <span class="flex items-center gap-2 text-sm font-bold">
+                    <span x-show="Math.abs(diff) < 0.005"><x-icon name="check" class="size-5" /></span>
+                    <span x-show="Math.abs(diff) >= 0.005"><x-icon name="alert" class="size-5" /></span>
+                    <span x-text="Math.abs(diff) < 0.005 ? 'La caja cuadra' : (diff > 0 ? 'Sobra dinero' : 'Falta dinero')"></span>
+                </span>
+                <span x-show="Math.abs(diff) >= 0.005" class="num text-[2rem] leading-none font-bold" x-text="fmt(Math.abs(diff ?? 0))"></span>
+            </div>
 
             <div>
                 <label class="label" for="notes">Nota <span class="font-normal text-muted">(opcional)</span></label>
-                <input id="notes" type="text" wire:model="notes" class="input" placeholder="Ej. se pagó al gas con efectivo de la caja">
+                <input id="notes" type="text" wire:model="notes" class="input" placeholder="Ej. se pagó el gas con efectivo de la caja">
             </div>
 
-            <button type="button" wire:click="save" class="btn-primary btn-lg w-full" wire:loading.attr="disabled">
-                {{ $this->saved ? 'Actualizar corte' : 'Guardar corte' }}
+            <button type="button" wire:click="save" class="btn-primary btn-lg w-full" wire:loading.attr="disabled" wire:target="save">
+                <span wire:loading.remove wire:target="save">{{ $this->saved ? 'Actualizar corte' : 'Guardar corte' }}</span>
+                <span wire:loading wire:target="save">Guardando...</span>
             </button>
             @if ($this->saved)
                 <p class="-mt-2 text-center text-sm text-muted">Guardado a las {{ $this->saved->updated_at->format('g:i a') }}</p>

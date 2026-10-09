@@ -179,6 +179,9 @@ new #[Title('Vender')] class extends Component
             this.$nextTick(() => bump(document.getElementById('q-' + id)));
         },
         clear() { this.cart = {}; this.received = null; this.reference = null; this.payOpen = false },
+        async confirmClear() {
+            if (await this.$store.confirm.ask({ title: '¿Vaciar el pedido?', message: 'Se quitarán ' + this.count + (this.count === 1 ? ' producto.' : ' productos.'), action: 'Vaciar' })) this.clear();
+        },
         get lines() {
             return Object.entries(this.cart)
                 .filter(([id, q]) => q > 0 && this.catalog[id])
@@ -200,7 +203,7 @@ new #[Title('Vender')] class extends Component
     }">
     <x-page-header title="Vender">
         <x-slot:actions>
-            <button type="button" x-show="count > 0" x-cloak @click="clear()" class="btn-quiet md:hidden">Vaciar</button>
+            <button type="button" x-show="count > 0" x-cloak @click="confirmClear()" class="btn-quiet md:hidden">Vaciar</button>
         </x-slot:actions>
         @if ($this->categories->count() > 1)
             <div class="scroll-fade -mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] md:mx-0 md:px-0">
@@ -222,16 +225,22 @@ new #[Title('Vender')] class extends Component
                     </x-slot:action>
                 </x-empty>
             @else
+                @php
+                    // Un tono de la paleta por categoría para reconocerlas de un vistazo.
+                    $tints = ['bg-tint-1', 'bg-tint-2', 'bg-tint-3', 'bg-tint-4', 'bg-tint-5'];
+                    $catIndex = $this->categories->flip();
+                @endphp
                 <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">
                     @foreach ($this->products as $product)
+                        @php $tint = $tints[($catIndex[$product->category] ?? 0) % count($tints)]; @endphp
                         <div wire:key="p-{{ $product->id }}"
                              x-show="category === '' || category === @js($product->category)"
-                             class="relative min-h-[8.25rem] rounded-2xl border-2 motion-safe:transition motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97]"
-                             :class="qty({{ $product->id }}) > 0 ? 'border-chile bg-chile-soft/45' : 'border-transparent bg-surface shadow-[0_0_0_1px_var(--color-line)]'">
+                             class="{{ $tint }} relative min-h-[8.25rem] rounded-2xl border-2 motion-safe:transition motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97]"
+                             :class="qty({{ $product->id }}) > 0 ? 'border-chile shadow-[0_6px_16px_-8px_rgb(224_36_36/0.55)]' : 'border-transparent'">
                             <button type="button" @click="add({{ $product->id }})" class="add absolute inset-0 w-full touch-manipulation rounded-2xl" aria-label="Agregar {{ $product->name }}"></button>
                             <div class="pointer-events-none relative flex h-full min-h-[8.25rem] flex-col justify-between gap-3 p-3.5">
-                                <p class="pr-9 font-display text-[1.4rem] leading-[0.95] font-bold hyphens-auto" lang="es">{{ $product->name }}</p>
-                                <span class="num inline-flex w-fit items-center rounded-lg bg-limon px-2.5 py-0.5 text-xl font-bold text-on-limon">{{ money($product->price) }}</span>
+                                <p class="pr-10 font-display {{ mb_strlen($product->name) > 10 ? 'text-[1.25rem]' : 'text-[1.4rem]' }} leading-[0.95] font-bold hyphens-auto" lang="es">{{ $product->name }}</p>
+                                <span class="num inline-flex w-fit items-center rounded-lg bg-ink px-2.5 py-0.5 text-xl font-bold text-bg">{{ money($product->price) }}</span>
                             </div>
                             <template x-if="qty({{ $product->id }}) > 0">
                                 <div>
@@ -253,7 +262,7 @@ new #[Title('Vender')] class extends Component
             <div class="card space-y-3 !p-5">
                 <div class="flex items-center justify-between">
                     <h2 class="section-title">Pedido</h2>
-                    <button type="button" x-show="count > 0" x-cloak @click="clear()" class="btn-quiet -mr-2">Vaciar</button>
+                    <button type="button" x-show="count > 0" x-cloak @click="confirmClear()" class="btn-quiet -mr-2">Vaciar</button>
                 </div>
                 <div x-show="count === 0" class="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted">
                     <x-icon name="ticket" class="size-7 opacity-60" />
