@@ -27,14 +27,16 @@ services:
 
   db:
     image: postgres:17-alpine
+    # Solo en este equipo: Docker se salta el firewall y lo dejaría abierto a la red.
     ports:
-      - "${FORWARD_DB_PORT:-5433}:5432"
+      - "127.0.0.1:${FORWARD_DB_PORT:-5433}:5432"
     environment:
       POSTGRES_DB: ${DB_DATABASE:-taqueria}
       POSTGRES_USER: ${DB_USERNAME:-taqueria}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
     volumes:
       - db-data:/var/lib/postgresql/data
+      - ./docker/postgres/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-taqueria} -d ${DB_DATABASE:-taqueria}"]
       interval: 5s
