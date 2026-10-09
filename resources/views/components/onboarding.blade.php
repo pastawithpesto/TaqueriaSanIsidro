@@ -2,11 +2,12 @@
 @php
     $steps = [
         ['title' => 'Bienvenido', 'text' => 'Aquí llevas las ventas, los gastos y las ganancias de '.Branding::name().'. En un minuto te enseñamos lo básico.'],
-        ['title' => 'Vender', 'text' => 'Toca un producto para sumarlo al pedido; con el botón − lo quitas. Cuando esté listo, toca Cobrar.'],
-        ['title' => 'Cobrar', 'text' => 'Elige efectivo, transferencia o tarjeta. En efectivo toca el billete que te dieron y la app te dice el cambio.'],
-        ['title' => '¿Te equivocaste?', 'text' => 'Justo después de cobrar aparece Deshacer. Tienes 10 minutos para cancelar la venta y corregir el pedido.'],
+        ['title' => 'Tomar el pedido', 'text' => 'Toca un producto para sumarlo; con el botón − lo quitas. Luego toca Ver pedido.'],
+        ['title' => 'Sin cebolla, extra queso', 'text' => 'En el pedido, toca un producto para darle indicaciones: sin cebolla, extras o una nota. Puedes aplicarlo solo a algunas piezas, por ejemplo 2 de 3 tortas.'],
+        ['title' => 'Cobrar o guardar', 'text' => 'Ponle nombre al pedido, como "camioneta negra". Cóbralo de una vez o guárdalo sin cobrar. Si te equivocas al cobrar, toca Deshacer.'],
+        ['title' => 'Pedidos', 'text' => 'Aquí ves lo que falta entregar, con su nombre, el tiempo de espera y las indicaciones. Entrega con un toque o cobra lo pendiente.'],
         ['title' => 'Gastos', 'text' => 'Anota lo que compras: carne, tortilla, gas. Si eliges el insumo y la cantidad, su costo se actualiza solo.'],
-        ['title' => 'Recetas', 'text' => 'En Más, Productos, arma la receta de cada producto. Con eso la app calcula cuánto ganas por pieza.'],
+        ['title' => 'Recetas y extras', 'text' => 'En Más, Productos, arma la receta de cada producto, marca lo que se puede pedir sin y agrega extras con precio. Así la app calcula tu ganancia.'],
         ['title' => 'Corte y resumen', 'text' => 'Al cerrar, haz el Corte de caja para ver si cuadra el efectivo. En Resumen ves cuánto vendiste y ganaste.'],
     ];
     $show = auth()->check() && auth()->user()->onboarded_at === null;
@@ -83,8 +84,38 @@
                     </div>
                 </div>
 
-                {{-- 2: cobrar --}}
-                <div x-show="step === 2" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2 rounded-2xl bg-surface p-3 shadow-xl">
+                {{-- 2: indicaciones --}}
+                <div x-show="step === 2" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2.5 rounded-2xl bg-surface p-3 shadow-xl">
+                    <p class="font-display text-lg leading-none font-bold text-ink">Torta</p>
+                    <div class="flex items-center justify-between rounded-lg bg-sunken px-2.5 py-1.5 text-xs font-semibold text-ink">Aplicar a <span class="num text-lg">2 <span class="text-xs text-muted">de 3</span></span></div>
+                    <div class="flex flex-wrap gap-1.5 text-xs font-semibold">
+                        <span class="rounded-full bg-chile px-2.5 py-1 text-white">Sin cebolla</span>
+                        <span class="rounded-full border border-line px-2.5 py-1 text-ink">Sin jitomate</span>
+                        <span class="rounded-full bg-salsa px-2.5 py-1 text-white">Extra queso +$10</span>
+                    </div>
+                    <div class="rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted italic">bien dorada</div>
+                </div>
+
+                {{-- 4: pedidos --}}
+                <div x-show="step === 4" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="rounded-2xl bg-surface shadow-xl">
+                    <div class="flex items-center gap-2.5 px-3 pt-3">
+                        <span class="num grid size-9 place-items-center rounded-lg bg-limon text-lg font-bold text-on-limon">7</span>
+                        <span class="flex-1 leading-tight"><span class="block font-display text-lg font-bold text-ink">Camioneta negra</span><span class="text-[11px] text-muted">hace 6 min</span></span>
+                        <span class="rounded-md bg-limon-soft px-1.5 py-0.5 text-[10px] font-semibold text-ink">Por cobrar</span>
+                    </div>
+                    <div class="space-y-1 border-t border-line mx-3 mt-2.5 py-2 text-xs text-ink">
+                        <p><span class="num text-base font-bold text-chile">2</span> Torta <span class="rounded bg-chile px-1 text-[10px] font-semibold text-white">Sin cebolla</span></p>
+                        <p><span class="num text-base font-bold text-chile">4</span> Taco de bistec</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5 border-t border-line p-2.5 text-xs font-semibold">
+                        <span class="rounded-lg border border-line py-1.5 text-center text-ink">Cobrar</span>
+                        <span class="rounded-lg bg-salsa py-1.5 text-center text-white">Entregar</span>
+                    </div>
+                </div>
+
+                {{-- 3: cobrar o guardar --}}
+                <div x-show="step === 3" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2 rounded-2xl bg-surface p-3 shadow-xl">
+                    <div class="rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink"><span class="text-muted">¿Para quién?</span> Camioneta negra</div>
                     <div class="grid grid-cols-3 gap-1 rounded-lg bg-ink/8 p-1 text-center text-[11px] font-semibold">
                         <span class="rounded-md bg-surface py-1 text-ink shadow-sm">Efectivo</span><span class="py-1 text-muted">Transf.</span><span class="py-1 text-muted">Tarjeta</span>
                     </div>
@@ -96,17 +127,14 @@
                     <div class="flex items-center justify-between rounded-lg bg-salsa-soft px-3 py-2 text-salsa">
                         <span class="text-xs font-bold">Cambio</span><span class="num text-2xl font-bold">$40</span>
                     </div>
+                    <div class="grid grid-cols-[auto_1fr] gap-1.5 text-xs font-semibold">
+                        <span class="rounded-lg border border-line px-2 py-2 text-ink">Guardar sin cobrar</span>
+                        <span class="rounded-lg bg-chile px-2 py-2 text-center text-white">Cobrar $60</span>
+                    </div>
                 </div>
 
-                {{-- 3: deshacer --}}
-                <div x-show="step === 3" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="flex items-center gap-2.5 rounded-2xl bg-ink px-3 py-3 text-bg shadow-xl">
-                    <span class="grid size-8 shrink-0 place-items-center rounded-full bg-salsa text-white"><x-icon name="check" class="size-4" /></span>
-                    <span class="flex-1 leading-tight"><span class="block text-xs opacity-75">Venta registrada</span><span class="num block text-xl font-bold">$60</span></span>
-                    <span class="inline-flex items-center gap-1 rounded-lg bg-bg/15 px-2.5 py-1.5 text-xs font-semibold ring-2 ring-limon"><x-icon name="undo" class="size-3.5" /> Deshacer</span>
-                </div>
-
-                {{-- 4: gastos --}}
-                <div x-show="step === 4" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="divide-y divide-line overflow-hidden rounded-2xl bg-surface shadow-xl">
+                {{-- 5: gastos --}}
+                <div x-show="step === 5" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="divide-y divide-line overflow-hidden rounded-2xl bg-surface shadow-xl">
                     @foreach ([['package', 'bg-limon text-on-limon', 'Bistec', '6 kg', '$1,140'], ['flame', 'bg-chile-soft text-chile', 'Gas', '', '$420'], ['cup', 'bg-naranja-soft text-ink', 'Desechables', '', '$180']] as [$icon, $tone, $name, $meta, $amount])
                         <div class="flex items-center gap-2.5 px-3 py-2.5">
                             <span class="grid size-8 place-items-center rounded-lg {{ $tone }}"><x-icon :name="$icon" class="size-4" /></span>
@@ -116,8 +144,8 @@
                     @endforeach
                 </div>
 
-                {{-- 5: recetas --}}
-                <div x-show="step === 5" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2 rounded-2xl bg-surface p-3 shadow-xl">
+                {{-- 6: recetas --}}
+                <div x-show="step === 6" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2 rounded-2xl bg-surface p-3 shadow-xl">
                     <p class="font-display text-lg leading-none font-bold text-ink">Taco de bistec</p>
                     @foreach ([['Bistec', '0.05 kg'], ['Tortilla', '2 pza'], ['Cilantro', '0.02 paq']] as [$i, $q])
                         <div class="flex justify-between text-xs text-ink"><span>{{ $i }}</span><span class="text-muted">{{ $q }}</span></div>
@@ -129,8 +157,8 @@
                     </div>
                 </div>
 
-                {{-- 6: corte y resumen --}}
-                <div x-show="step === 6" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2">
+                {{-- 7: corte y resumen --}}
+                <div x-show="step === 7" x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="opacity-0 translate-x-6" class="space-y-2">
                     <div class="flex items-center justify-between rounded-2xl bg-surface px-3 py-2.5 shadow-xl">
                         <span class="text-xs font-semibold text-muted">Debe haber en caja</span><span class="num text-2xl font-bold text-ink">$1,250</span>
                     </div>

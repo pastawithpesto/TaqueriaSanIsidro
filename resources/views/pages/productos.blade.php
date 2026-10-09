@@ -2,6 +2,7 @@
 
 use App\Models\Ingredient;
 use App\Models\Product;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -22,8 +23,11 @@ new #[Title('Productos')] class extends Component
 
     public int $sort_order = 0;
 
-    /** @var array<int, array{ingredient_id: int, quantity: string}> */
+    /** @var array<int, array{ingredient_id: int, quantity: string, removable: bool}> */
     public array $recipe = [];
+
+    /** @var array<int, array{id: ?int, name: string, price: string, ingredient_id: ?int, quantity: ?string}> */
+    public array $extras = [];
 
     #[Computed]
     public function products()
@@ -52,7 +56,7 @@ new #[Title('Productos')] class extends Component
 
     public function edit(int $id): void
     {
-        $p = Product::with('ingredients')->findOrFail($id);
+        $p = Product::with(['ingredients', 'extras'])->findOrFail($id);
 
         $this->resetForm();
         $this->editingId = $p->id;
@@ -64,6 +68,14 @@ new #[Title('Productos')] class extends Component
         $this->recipe = $p->ingredients->map(fn ($i) => [
             'ingredient_id' => $i->id,
             'quantity' => rtrim(rtrim((string) $i->pivot->quantity, '0'), '.'),
+            'removable' => (bool) $i->pivot->removable,
+        ])->values()->all();
+        $this->extras = $p->extras->map(fn ($e) => [
+            'id' => $e->id,
+            'name' => $e->name,
+            'price' => rtrim(rtrim((string) $e->price, '0'), '.'),
+            'ingredient_id' => $e->ingredient_id,
+            'quantity' => $e->quantity !== null ? rtrim(rtrim((string) $e->quantity, '0'), '.') : null,
         ])->values()->all();
         $this->showForm = true;
     }
@@ -71,15 +83,16 @@ new #[Title('Productos')] class extends Component
     /** Copia el producto y su receta: útil para variedades (pastor, tripa). */
     public function duplicate(int $id): void
     {
-        $source = Product::with('ingredients')->findOrFail($id);
+        $source = Product::with(['ingredients', 'extras'])->findOrFail($id);
 
         $copy = $source->replicate();
         $copy->name = $source->name.' (copia)';
         $copy->sort_order = (int) Product::max('sort_order') + 1;
         $copy->save();
         $copy->ingredients()->sync($source->ingredients->mapWithKeys(
-            fn ($i) => [$i->id => ['quantity' => $i->pivot->quantity]]
+            fn ($i) => [$i->id => ['quantity' => $i->pivot->quantity, 'removable' => $i->pivot->removable]]
         )->all());
+        $copy->extras()->createMany($source->extras->map(fn ($e) => $e->only(['name', 'price', 'ingredient_id', 'quantity', 'sort_order']))->all());
 
         unset($this->products);
         $this->edit($copy->id);
@@ -92,7 +105,7 @@ new #[Title('Productos')] class extends Component
 
     protected function resetForm(): void
     {
-        $this->reset('showForm', 'editingId', 'name', 'category', 'price', 'sort_order', 'recipe');
+        $this->reset('showForm', 'editingId', 'name', 'category', 'price', 'sort_order', 'recipe', 'extras');
         $this->active = true;
         $this->resetErrorBag();
     }
@@ -101,7 +114,19 @@ new #[Title('Productos')] class extends Component
     {
         $this->recipe = collect($this->recipe)
             ->filter(fn ($r) => ! empty($r['ingredient_id']))
-            ->map(fn ($r) => ['ingredient_id' => (int) $r['ingredient_id'], 'quantity' => (string) $r['quantity']])
+            ->map(fn ($r) => ['ingredient_id' => (int) $r['ingredient_id'], 'quantity' => (string) $r['quantity'], 'removable' => (bool) ($r['removable'] ?? false)])
+            ->values()->all();
+
+        // Extras: se ignoran los renglones sin nombre.
+        $this->extras = collect($this->extras)
+            ->filter(fn ($e) => trim((string) ($e['name'] ?? '')) !== '')
+            ->map(fn ($e) => [
+                'id' => $e['id'] ?? null,
+                'name' => trim($e['name']),
+                'price' => (string) ($e['price'] ?? '0'),
+                'ingredient_id' => ($e['ingredient_id'] ?? null) ?: null,
+                'quantity' => ($e['ingredient_id'] ?? null) ? (string) ($e['quantity'] ?? '') : null,
+            ])
             ->values()->all();
 
         $data = $this->validate([
@@ -112,13 +137,32 @@ new #[Title('Productos')] class extends Component
             'sort_order' => ['integer', 'min:0'],
             'recipe.*.ingredient_id' => ['required', 'exists:ingredients,id'],
             'recipe.*.quantity' => ['required', 'numeric', 'gt:0'],
+            'extras.*.name' => ['required', 'string', 'max:60'],
+            'extras.*.price' => ['required', 'numeric', 'min:0'],
+            'extras.*.ingredient_id' => ['nullable', 'exists:ingredients,id'],
+            'extras.*.quantity' => ['nullable', 'required_with:extras.*.ingredient_id', 'numeric', 'gt:0'],
         ]);
 
-        $product = Product::updateOrCreate(['id' => $this->editingId], collect($data)->except('recipe')->all());
+        $product = DB::transaction(function () use ($data) {
+            $product = Product::updateOrCreate(['id' => $this->editingId], collect($data)->except(['recipe', 'extras'])->all());
 
-        $product->ingredients()->sync(
-            collect($this->recipe)->mapWithKeys(fn ($r) => [$r['ingredient_id'] => ['quantity' => $r['quantity']]])->all()
-        );
+            $product->ingredients()->sync(
+                collect($this->recipe)->mapWithKeys(fn ($r) => [$r['ingredient_id'] => ['quantity' => $r['quantity'], 'removable' => $r['removable']]])->all()
+            );
+
+            // Se conservan los ids de los extras existentes: los pedidos guardados los referencian.
+            $keep = [];
+            foreach ($this->extras as $i => $e) {
+                $extra = $product->extras()->updateOrCreate(
+                    ['id' => $e['id']],
+                    ['name' => $e['name'], 'price' => $e['price'], 'ingredient_id' => $e['ingredient_id'], 'quantity' => $e['quantity'], 'sort_order' => $i],
+                );
+                $keep[] = $extra->id;
+            }
+            $product->extras()->whereNotIn('id', $keep)->delete();
+
+            return $product;
+        });
 
         $this->resetForm();
         unset($this->products, $this->categories);
@@ -160,11 +204,14 @@ new #[Title('Productos')] class extends Component
             if (! (q > 0)) return this.addError = 'Escribe la cantidad.';
             const rows = [...($wire.recipe ?? [])];
             const i = rows.findIndex(r => String(r.ingredient_id) === String(this.newIng));
-            const row = { ingredient_id: Number(this.newIng), quantity: String(q) };
+            const row = { ingredient_id: Number(this.newIng), quantity: String(q), removable: false };
             i === -1 ? rows.push(row) : rows.splice(i, 1, row);
             $wire.recipe = rows; this.newIng = ''; this.newQty = ''; this.addError = '';
         },
         remove(i) { const rows = [...$wire.recipe]; rows.splice(i, 1); $wire.recipe = rows },
+        toggleRemovable(i) { const rows = $wire.recipe.map(r => ({ ...r })); rows[i].removable = ! rows[i].removable; $wire.recipe = rows },
+        addExtra() { $wire.extras = [...($wire.extras ?? []), { id: null, name: '', price: '', ingredient_id: null, quantity: null }] },
+        removeExtra(i) { const rows = [...$wire.extras]; rows.splice(i, 1); $wire.extras = rows },
         // Un solo cálculo que lee receta y precio directamente, para que siempre se actualice.
         stats() {
             const cost = ($wire.recipe ?? []).reduce((t, r) => t + (Number(r.quantity) || 0) * (this.ings[r.ingredient_id]?.cost ?? 0), 0);
@@ -286,6 +333,13 @@ new #[Title('Productos')] class extends Component
                 <div wire:ignore class="space-y-3">
                 <template x-for="(row, index) in $wire.recipe ?? []" :key="row.ingredient_id">
                     <div class="flex items-center gap-2">
+                        <button type="button" @click="toggleRemovable(index)" :aria-pressed="!! row.removable"
+                                class="grid size-9 shrink-0 place-items-center rounded-lg border motion-safe:transition"
+                                :class="row.removable ? 'border-chile bg-chile text-white' : 'border-line bg-surface text-muted'"
+                                :title="row.removable ? 'Se puede pedir sin este ingrediente' : 'Siempre lo lleva'"
+                                :aria-label="'Se puede pedir sin ' + (ings[row.ingredient_id]?.name ?? '')">
+                            <x-icon name="x" class="size-4" />
+                        </button>
                         <span class="min-w-0 flex-1 truncate text-[15px] font-medium" x-text="ings[row.ingredient_id]?.name ?? 'Insumo inactivo'"></span>
                         <input type="number" step="any" inputmode="decimal" x-model="row.quantity" class="input !min-h-10 w-24 !px-2.5 text-right" :aria-label="'Cantidad de ' + (ings[row.ingredient_id]?.name ?? '')">
                         <span class="w-12 text-sm text-muted" x-text="ings[row.ingredient_id]?.unit"></span>
@@ -293,6 +347,10 @@ new #[Title('Productos')] class extends Component
                     </div>
                 </template>
                 <p x-show="! ($wire.recipe ?? []).length" class="text-sm text-muted">Aún no hay insumos en la receta.</p>
+                <p x-show="($wire.recipe ?? []).length" class="flex items-center gap-2 text-sm text-muted">
+                    <span class="grid size-5 shrink-0 place-items-center rounded bg-chile text-white"><x-icon name="x" class="size-3" /></span>
+                    Marca lo que el cliente puede pedir sin, como cebolla o cilantro. Al vender aparecerá "Sin cebolla".
+                </p>
                 </div>
                 @if ($errors->has('recipe.*'))
                     <p class="error">Revisa las cantidades de la receta: todas deben ser mayores a cero.</p>
@@ -325,6 +383,43 @@ new #[Title('Productos')] class extends Component
                     <div><dt class="text-xs font-semibold text-muted">Ganas</dt><dd class="num text-2xl font-bold" :class="stats().profit > 0 ? 'text-salsa' : (stats().profit < 0 ? 'text-chile' : '')" x-text="stats().price > 0 ? fmt(stats().profit) : '-'"></dd></div>
                     <div><dt class="text-xs font-semibold text-muted">Margen</dt><dd class="num text-2xl font-bold" x-text="stats().margin === null ? '-' : stats().margin + '%'"></dd></div>
                 </dl>
+            </section>
+
+            <section class="space-y-3 rounded-2xl bg-sunken/60 p-4">
+                <div>
+                    <h3 class="section-title">Extras</h3>
+                    <p class="text-sm text-muted">Lo que se cobra aparte, como extra queso o aguacate.</p>
+                </div>
+                <div wire:ignore class="space-y-3">
+                    <template x-for="(extra, i) in $wire.extras ?? []" :key="i">
+                        <div class="space-y-2 rounded-xl bg-surface p-3">
+                            <div class="flex gap-2">
+                                <input type="text" x-model="extra.name" maxlength="60" class="input !min-h-11 flex-1" placeholder="Ej. Extra queso" aria-label="Nombre del extra">
+                                <div class="relative w-28">
+                                    <span class="num pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 font-semibold text-muted">$</span>
+                                    <input type="number" step="0.01" min="0" inputmode="decimal" x-model="extra.price" class="input num !min-h-11 !pl-7 text-lg font-semibold" placeholder="0" aria-label="Precio del extra">
+                                </div>
+                                <button type="button" @click="removeExtra(i)" class="btn-quiet size-11 justify-center !px-0" aria-label="Quitar extra"><x-icon name="x" class="size-4" /></button>
+                            </div>
+                            <div class="flex gap-2">
+                                <select x-model="extra.ingredient_id" class="input !min-h-10 flex-1 text-sm" aria-label="Insumo que usa">
+                                    <option value="">No usa insumo</option>
+                                    @foreach ($this->ingredients as $ing)
+                                        <option value="{{ $ing->id }}">Usa {{ $ing->name }}</option>
+                                    @endforeach
+                                </select>
+                                <div class="relative w-28" x-show="extra.ingredient_id">
+                                    <input type="number" step="any" min="0" inputmode="decimal" x-model="extra.quantity" class="input !min-h-10 pr-11 text-sm" placeholder="Cant." aria-label="Cantidad de insumo">
+                                    <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted" x-text="ings[extra.ingredient_id]?.unit ?? ''"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                @if ($errors->has('extras.*'))
+                    <p class="error">Revisa los extras: cada uno necesita nombre y precio, y cantidad si usa un insumo.</p>
+                @endif
+                <button type="button" @click="addExtra()" class="btn w-full"><x-icon name="plus" class="size-4" /> Agregar extra</button>
             </section>
 
             <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">

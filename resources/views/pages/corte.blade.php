@@ -187,6 +187,15 @@ new #[Title('Corte de caja')] class extends Component
             @error('opening') <p class="error px-4 pb-3">{{ $message }}</p> @enderror
         </section>
 
+        @php $unpaid = \App\Models\Order::where('status', \App\Enums\OrderStatus::Open)->get(['total']); @endphp
+        @if ($unpaid->isNotEmpty())
+            <a href="{{ route('pedidos') }}" wire:navigate class="flex items-center gap-3 rounded-2xl bg-limon-soft px-4 py-3 text-sm">
+                <x-icon name="alert" class="size-5 shrink-0" />
+                <span class="flex-1">Hay <span class="font-semibold">{{ $unpaid->count() }} {{ $unpaid->count() === 1 ? 'pedido' : 'pedidos' }} sin cobrar</span> por {{ money($unpaid->sum('total')) }}. Cóbralos antes de cerrar.</span>
+                <x-icon name="right" class="size-4" />
+            </a>
+        @endif
+
         @if ($otherSales > 0)
             <p class="flex gap-2 px-1 text-sm text-muted">
                 <x-icon name="info" class="mt-0.5 size-4 shrink-0" />

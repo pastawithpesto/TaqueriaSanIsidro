@@ -40,10 +40,11 @@ docker compose logs -f app
 
 ## Módulos
 
-- Vender: botones por producto, total, método de pago (efectivo, transferencia, tarjeta) y cambio.
+- Vender: botones por producto, indicaciones por pieza ("sin cebolla" sale de la receta y descuenta su costo; extras con precio), nota libre y nombre del pedido. Se cobra de una vez o se guarda sin cobrar.
+- Pedidos: cola de lo que falta entregar y de lo que falta cobrar, con tiempo de espera.
 - Ventas: historial por día, con cancelación.
 - Gastos: compras de insumos, gas, desechables, etc. Una compra de insumo con cantidad actualiza el costo por unidad.
-- Productos: precio, categoría y receta. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte.
+- Productos: precio, categoría, receta (marcando lo que se puede pedir sin) y extras. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte.
 - Insumos: catálogo con unidad y costo.
 - Resumen: ventas, gastos, ganancia por receta y ventas menos gastos, por periodo, con comparativo y horas fuertes.
 - Corte de caja: efectivo esperado contra contado.

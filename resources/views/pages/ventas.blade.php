@@ -67,7 +67,8 @@ new #[Title('Ventas')] class extends Component
 
     public function restore(int $id): void
     {
-        Order::whereKey($id)->update(['status' => OrderStatus::Paid]);
+        $order = Order::findOrFail($id);
+        $order->update(['status' => $order->payment_method ? OrderStatus::Paid : OrderStatus::Open]);
         unset($this->orders, $this->paid);
         $this->dispatch('toast', message: 'Venta restaurada');
     }
@@ -81,7 +82,8 @@ new #[Title('Ventas')] class extends Component
         'method' => $m,
         'total' => (float) $paid->where('payment_method', $m)->sum('total'),
     ])->filter(fn ($m) => $m['total'] > 0);
-    $cancelled = $this->orders->count() - $paid->count();
+    $cancelled = $this->orders->where('status', OrderStatus::Cancelled)->count();
+    $openCount = $this->orders->where('status', OrderStatus::Open)->count();
     $isToday = $this->dayLabel === 'Hoy';
     $color = fn ($m) => $m === PaymentMethod::Cash ? 'bg-ink' : ($m === PaymentMethod::Transfer ? 'bg-naranja' : 'bg-limon');
 @endphp
@@ -133,9 +135,11 @@ new #[Title('Ventas')] class extends Component
 
             <div class="flex items-baseline justify-between px-1">
                 <h2 class="section-title">Órdenes</h2>
-                @if ($cancelled > 0)
-                    <span class="text-sm text-muted">{{ $cancelled }} {{ $cancelled === 1 ? 'cancelada' : 'canceladas' }}</span>
-                @endif
+                <span class="text-sm text-muted">
+                    @if ($openCount > 0) <a href="{{ route('pedidos') }}" wire:navigate class="font-semibold text-chile underline">{{ $openCount }} por cobrar</a>@endif
+                    @if ($openCount > 0 && $cancelled > 0), @endif
+                    @if ($cancelled > 0) {{ $cancelled }} {{ $cancelled === 1 ? 'cancelada' : 'canceladas' }} @endif
+                </span>
             </div>
             <ul class="list">
                 @foreach ($this->orders as $order)
@@ -144,21 +148,28 @@ new #[Title('Ventas')] class extends Component
                         $cost = $order->items->sum(fn ($i) => $i->quantity * (float) $i->unit_cost);
                     @endphp
                     <li wire:key="o-{{ $order->id }}" x-data="{ open: false }">
+                        @php
+                            $isOpenOrder = $order->status === OrderStatus::Open;
+                            $summary = $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ');
+                        @endphp
                         <button type="button" @click="open = !open" class="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-sunken/50" :aria-expanded="open">
-                            <span class="num w-8 shrink-0 text-center text-lg font-bold text-muted">{{ $order->number }}</span>
+                            <span class="num w-8 shrink-0 text-center text-lg font-bold text-muted">{{ $order->daily_number ?? $order->number }}</span>
                             <span class="min-w-0 flex-1">
                                 <span @class(['block truncate text-[15px] font-semibold', 'text-muted line-through' => $isCancelled])>
-                                    {{ $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ') }}
+                                    {{ $order->label ?: $summary }}
                                 </span>
                                 <span class="mt-0.5 flex items-center gap-2 text-sm text-muted">
-                                    <span>{{ $order->sold_at->format('g:i a') }}</span>
-                                    @if ($order->payment_method !== PaymentMethod::Cash)
+                                    <span class="shrink-0">{{ $order->sold_at->format('g:i a') }}</span>
+                                    @if ($isOpenOrder)
+                                        <span class="badge bg-limon-soft text-ink">Por cobrar</span>
+                                    @elseif ($order->payment_method && $order->payment_method !== PaymentMethod::Cash)
                                         <span class="badge bg-naranja-soft text-ink">{{ $order->payment_method->label() }}</span>
                                     @endif
                                     @if ($isCancelled) <span class="badge bg-chile-soft text-chile">Cancelada</span> @endif
+                                    @if ($order->label) <span class="truncate">{{ $summary }}</span> @endif
                                 </span>
                             </span>
-                            <span @class(['num text-[1.375rem] font-bold', 'text-muted line-through' => $isCancelled])>{{ money($order->total) }}</span>
+                            <span @class(['num text-[1.375rem] font-bold', 'text-muted line-through' => $isCancelled, 'text-muted' => $isOpenOrder])>{{ money($order->total) }}</span>
                             <x-icon name="down" class="size-4 shrink-0 text-muted transition-transform duration-200" ::class="open && 'rotate-180'" />
                         </button>
 
@@ -167,7 +178,16 @@ new #[Title('Ventas')] class extends Component
                                 <ul class="space-y-1.5">
                                     @foreach ($order->items as $item)
                                         <li class="flex justify-between gap-3">
-                                            <span><span class="num font-bold">{{ $item->quantity }}</span> × {{ $item->product_name }} <span class="text-muted">a {{ money($item->unit_price) }}</span></span>
+                                            <span>
+                                                <span class="num font-bold">{{ $item->quantity }}</span> × {{ $item->product_name }} <span class="text-muted">a {{ money($item->unit_price) }}</span>
+                                                @if ($item->modifiers || $item->notes)
+                                                    <span class="mt-0.5 flex flex-wrap gap-1">
+                                                        @foreach ($item->withoutNames() as $name) <span class="badge bg-chile-soft text-chile">Sin {{ mb_strtolower($name) }}</span> @endforeach
+                                                        @foreach ($item->extras() as $extra) <span class="badge bg-salsa-soft text-salsa">+ {{ $extra['name'] }}</span> @endforeach
+                                                        @if ($item->notes) <span class="text-muted italic">{{ $item->notes }}</span> @endif
+                                                    </span>
+                                                @endif
+                                            </span>
                                             <span class="num text-base font-semibold">{{ money($item->subtotal) }}</span>
                                         </li>
                                     @endforeach
@@ -179,7 +199,9 @@ new #[Title('Ventas')] class extends Component
                                     <p class="text-muted">Referencia: <span class="font-semibold text-ink">{{ $order->payment_reference }}</span></p>
                                 @endif
                                 <div class="flex justify-end">
-                                    @if ($isCancelled)
+                                    @if ($isOpenOrder)
+                                        <a href="{{ route('vender', ['orden' => $order->id, 'cobrar' => 1]) }}" wire:navigate class="btn">Cobrar</a>
+                                    @elseif ($isCancelled)
                                         <button type="button" wire:click="restore({{ $order->id }})" class="btn">Restaurar venta</button>
                                     @else
                                         <button type="button" class="btn-quiet-danger -mr-2"

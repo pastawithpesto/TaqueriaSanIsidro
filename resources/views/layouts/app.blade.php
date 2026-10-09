@@ -2,17 +2,19 @@
 @php
     $main = [
         ['vender', 'Vender', 'sale'],
+        ['pedidos', 'Pedidos', 'orders'],
         ['ventas', 'Ventas', 'receipt'],
         ['gastos', 'Gastos', 'wallet'],
-        ['resumen', 'Resumen', 'chart'],
     ];
     $more = [
+        ['resumen', 'Resumen', 'chart'],
         ['corte', 'Corte de caja', 'banknote'],
         ['productos', 'Productos', 'tag'],
         ['insumos', 'Insumos', 'package'],
         ['ajustes', 'Ajustes', 'settings'],
     ];
     $moreActive = collect($more)->contains(fn ($l) => request()->routeIs($l[0]));
+    $pendingCount = \App\Models\Order::pending()->count();
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
@@ -47,7 +49,7 @@
                 </a>
                 <nav class="flex flex-col gap-0.5" aria-label="Principal">
                     @foreach ($main as [$route, $label, $icon])
-                        <x-nav-link :route="$route" :icon="$icon">{{ $label }}</x-nav-link>
+                        <x-nav-link :route="$route" :icon="$icon" :count="$route === 'pedidos' ? $pendingCount : 0">{{ $label }}</x-nav-link>
                     @endforeach
                     <p class="mt-5 mb-1.5 px-3 text-xs font-semibold text-muted">Administración</p>
                     @foreach ($more as [$route, $label, $icon])
@@ -79,8 +81,11 @@
                 <a href="{{ route($route) }}" wire:navigate
                    class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $active ? 'text-ink' : 'text-muted' }}"
                    @if ($active) aria-current="page" @endif>
-                    <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-chile text-white' : '' }}">
+                    <span class="relative flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-chile text-white' : '' }}">
                         <x-icon :name="$icon" class="size-[22px]" />
+                        @if ($route === 'pedidos' && $pendingCount > 0)
+                            <span class="num absolute -top-1.5 right-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-limon px-1 text-xs font-bold text-on-limon ring-2 ring-surface">{{ $pendingCount }}</span>
+                        @endif
                     </span>
                     {{ $label }}
                 </a>
