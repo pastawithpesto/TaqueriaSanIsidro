@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Setting;
 use App\Models\User;
 use App\Support\Branding;
+use Illuminate\Auth\Events\OtherDeviceLogout;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -152,5 +154,33 @@ class BrandingTest extends TestCase
             ->set('new_password_confirmation', 'otra-cosa-99')
             ->call('savePassword')
             ->assertHasErrors('new_password');
+    }
+
+    public function test_password_change_logs_out_other_devices(): void
+    {
+        Event::fake([OtherDeviceLogout::class]);
+        $this->actingAs(User::factory()->create(['password' => 'actual-123']));
+
+        Livewire::test('pages::ajustes')
+            ->set('current_password', 'actual-123')
+            ->set('new_password', 'nueva-12345')
+            ->set('new_password_confirmation', 'nueva-12345')
+            ->call('savePassword')
+            ->assertHasNoErrors();
+
+        Event::assertDispatched(OtherDeviceLogout::class);
+    }
+
+    public function test_logo_larger_than_4000_pixels_is_rejected(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test('pages::ajustes')
+            ->set('logo', UploadedFile::fake()->image('logo.png', 4100, 100))
+            ->call('saveLogo')
+            ->assertHasErrors(['logo' => 'La imagen es demasiado grande. Usa una de máximo 4000 por 4000 píxeles.']);
+
+        Setting::flush();
+        $this->assertFalse(Branding::hasCustomLogo());
     }
 }

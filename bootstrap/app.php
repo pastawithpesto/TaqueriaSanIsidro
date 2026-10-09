@@ -12,8 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Detrás de un proxy o túnel HTTPS (TRUSTED_PROXIES=*) para generar URLs https.
-        $middleware->trustProxies(at: env('TRUSTED_PROXIES') ?: null);
+        // Guarda el hash de la contraseña en la sesión: al cambiarla se cierran los demás equipos.
+        // Los proxies de confianza se configuran en AppServiceProvider (config/app.php).
+        $middleware->authenticateSessions();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

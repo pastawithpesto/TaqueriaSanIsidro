@@ -33,6 +33,8 @@ return [
     'gt' => [
         'numeric' => 'El campo :attribute debe ser mayor que :value.',
     ],
+    'before_or_equal' => 'La :attribute no puede ser futura.',
+    'dimensions' => 'La imagen es demasiado grande. Usa una de máximo 4000 por 4000 píxeles.',
     'attributes' => [
         'email' => 'correo',
         'password' => 'contraseña',

@@ -151,7 +151,7 @@ class CatalogTest extends TestCase
             ->assertHasErrors('recipe.0.quantity');
     }
 
-    public function test_product_can_be_deleted_and_past_sales_keep_their_name(): void
+    public function test_product_with_sales_is_hidden_instead_of_deleted(): void
     {
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
         $order = Order::create(['status' => 'paid', 'payment_method' => 'cash', 'total' => 20, 'sold_at' => now()]);
@@ -159,8 +159,17 @@ class CatalogTest extends TestCase
 
         Livewire::test('pages::productos')->call('delete', $taco->id);
 
-        $this->assertSame(0, Product::count());
-        $this->assertSame('Taco', $order->items()->sole()->product_name);
+        $this->assertFalse($taco->fresh()->active);
+        $this->assertSame($taco->id, $order->items()->sole()->product_id);
+    }
+
+    public function test_product_without_sales_is_deleted(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::productos')->call('delete', $taco->id);
+
+        $this->assertModelMissing($taco);
     }
 
     public function test_expense_can_be_edited(): void
@@ -203,5 +212,94 @@ class CatalogTest extends TestCase
             ->assertHasNoErrors();
 
         $this->assertNull(Expense::sole()->ingredient_id);
+    }
+
+    public function test_deleting_the_latest_purchase_restores_the_previous_cost(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 220]);
+        Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 5, 'total' => 1000, 'spent_on' => today()->subDays(3)]);
+        $latest = Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 5, 'total' => 1100, 'spent_on' => today()]);
+
+        Livewire::test('pages::gastos')->call('delete', $latest->id);
+
+        $this->assertSame('200.0000', $meat->fresh()->cost_per_unit);
+    }
+
+    public function test_moving_a_purchase_to_another_ingredient_recalculates_both_costs(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 0]);
+        $pork = Ingredient::create(['name' => 'Pastor', 'unit' => 'kg', 'cost_per_unit' => 0]);
+        Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 5, 'total' => 1000, 'spent_on' => today()->subDay()]);
+        $wrong = Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 4, 'total' => 600, 'spent_on' => today()]);
+
+        Livewire::test('pages::gastos')->call('edit', $wrong->id)->set('ingredient_id', $pork->id)->call('save')->assertHasNoErrors();
+
+        $this->assertSame('200.0000', $meat->fresh()->cost_per_unit);
+        $this->assertSame('150.0000', $pork->fresh()->cost_per_unit);
+    }
+
+    public function test_future_expense_date_is_rejected(): void
+    {
+        Livewire::test('pages::gastos')
+            ->set('category', 'gas')
+            ->set('total', '300')
+            ->set('spent_on', today()->addDay()->toDateString())
+            ->call('save')
+            ->assertHasErrors(['spent_on' => 'La fecha no puede ser futura.']);
+
+        $this->assertSame(0, Expense::count());
+    }
+
+    public function test_changing_kilos_to_grams_converts_recipes_purchases_and_cost(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $taco->ingredients()->attach($meat, ['quantity' => 0.05]);
+        $taco->extras()->create(['name' => 'Doble carne', 'price' => 10, 'ingredient_id' => $meat->id, 'quantity' => 0.03]);
+        $purchase = Expense::create(['category' => 'ingredients', 'ingredient_id' => $meat->id, 'quantity' => 5, 'total' => 1000, 'spent_on' => today()]);
+
+        Livewire::test('pages::insumos')->call('edit', $meat->id)->set('unit', 'g')->call('save')->assertHasNoErrors();
+
+        $this->assertSame('g', $meat->fresh()->unit);
+        $this->assertSame('0.2000', $meat->fresh()->cost_per_unit);
+        $this->assertSame('50.0000', $taco->ingredients()->sole()->pivot->quantity);
+        $this->assertSame('30.0000', $taco->extras()->sole()->quantity);
+        $this->assertSame('5000.0000', $purchase->fresh()->quantity);
+        $this->assertSame(10.0, $taco->fresh()->unitCost());
+    }
+
+    public function test_unit_of_an_ingredient_in_use_cannot_change_to_an_unrelated_unit(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
+        Product::create(['name' => 'Taco', 'price' => 20])->ingredients()->attach($meat, ['quantity' => 0.05]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $meat->id)
+            ->set('unit', 'pza')
+            ->call('save')
+            ->assertHasErrors(['unit' => 'Ya se usa en recetas o compras en kg. Para medirlo en pza, crea un insumo nuevo.']);
+
+        $this->assertSame('kg', $meat->fresh()->unit);
+    }
+
+    public function test_dragging_a_product_reorders_only_its_category(): void
+    {
+        $bistec = Product::create(['name' => 'Bistec', 'category' => 'Tacos', 'price' => 20, 'sort_order' => 0]);
+        $torta = Product::create(['name' => 'Torta', 'category' => 'Tortas', 'price' => 39, 'sort_order' => 1]);
+        $pastor = Product::create(['name' => 'Pastor', 'category' => 'Tacos', 'price' => 20, 'sort_order' => 2]);
+
+        Livewire::test('pages::productos')->call('sortProduct', $pastor->id, 0);
+
+        $this->assertSame(['Pastor', 'Torta', 'Bistec'], Product::orderBy('sort_order')->pluck('name')->all());
+    }
+
+    public function test_moving_a_product_down_swaps_it_with_the_next_in_its_category(): void
+    {
+        $bistec = Product::create(['name' => 'Bistec', 'category' => 'Tacos', 'price' => 20, 'sort_order' => 0]);
+        Product::create(['name' => 'Pastor', 'category' => 'Tacos', 'price' => 20, 'sort_order' => 1]);
+
+        Livewire::test('pages::productos')->call('move', $bistec->id, 1);
+
+        $this->assertSame(['Pastor', 'Bistec'], Product::orderBy('sort_order')->pluck('name')->all());
     }
 }

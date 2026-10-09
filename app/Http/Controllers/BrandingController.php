@@ -29,9 +29,9 @@ class BrandingController extends Controller
             'start_url' => '/',
             'scope' => '/',
             'display' => 'standalone',
-            'orientation' => 'portrait',
-            'background_color' => '#f4f3f0',
-            'theme_color' => '#c62a1d',
+            // Sin orientación fija: la tablet de cocina se usa también en horizontal.
+            'background_color' => '#fdf5e8',
+            'theme_color' => '#ffd657',
             'icons' => [
                 ['src' => Branding::logoUrl(192), 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
                 ['src' => Branding::logoUrl(512), 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],

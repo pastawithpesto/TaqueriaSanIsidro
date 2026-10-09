@@ -38,4 +38,16 @@ class SummaryTest extends TestCase
 
         $this->assertSame(5, (int) $component->get('topProducts')->first()->qty);
     }
+
+    public function test_delivery_fees_count_as_sales_and_are_shown_apart(): void
+    {
+        $this->actingAs(User::factory()->create());
+        Order::create(['status' => OrderStatus::Paid, 'payment_method' => 'cash', 'service' => 'delivery', 'total' => 125, 'delivery_fee' => 25, 'sold_at' => now(), 'paid_at' => now()]);
+
+        $component = Livewire::test('pages::resumen')->set('range', 'today');
+
+        $this->assertEquals(125, $component->get('totals')['sales']);
+        $this->assertEquals(25, $component->get('totals')['delivery']);
+        $component->assertSee('incluye $25 de envíos a domicilio');
+    }
 }

@@ -3,7 +3,7 @@
     Día anterior / elegir fecha / día siguiente. La etiqueta cambia al instante en el
     navegador y el servidor carga los datos del día en paralelo.
 --}}
-<div class="flex items-center gap-2"
+<div {{ $attributes->merge(['class' => 'flex items-center gap-2']) }}
      x-data="{
         date: $wire.$entangle('{{ $model }}', true),
         max: @js($max),

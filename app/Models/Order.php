@@ -56,8 +56,36 @@ class Order extends Model
     {
         $query->where(function (Builder $q) {
             $q->where('status', OrderStatus::Open)
-                ->orWhere(fn (Builder $q) => $q->where('status', OrderStatus::Paid)->whereNull('delivered_at')->where('sold_at', '>=', today()));
+                ->orWhere(fn (Builder $q) => $q->where('status', OrderStatus::Paid)->whereNull('delivered_at')->whereRaw('COALESCE(paid_at, sold_at) >= ?', [today()]));
         });
+    }
+
+    /** Hora en que el cliente lo espera (la de recogida o la del pedido) dentro de [$from, $to). */
+    public function scopeDueBetween(Builder $query, ?CarbonInterface $from, ?CarbonInterface $to = null): void
+    {
+        $query->when($from, fn (Builder $q) => $q->whereRaw('COALESCE(pickup_at, sold_at) >= ?', [$from]))
+            ->when($to, fn (Builder $q) => $q->whereRaw('COALESCE(pickup_at, sold_at) < ?', [$to]));
+    }
+
+    /**
+     * Órdenes que cuentan en el rango: las cobradas por la hora del cobro y las demás
+     * por la hora del pedido. Así un pedido guardado anoche y cobrado hoy cuenta hoy,
+     * igual que en el corte de caja.
+     */
+    public function scopeCountedBetween(Builder $query, CarbonInterface $from, CarbonInterface $to): void
+    {
+        $query->whereRaw('COALESCE(paid_at, sold_at) BETWEEN ? AND ?', [$from, $to]);
+    }
+
+    public function scopePaidBetween(Builder $query, CarbonInterface $from, CarbonInterface $to): void
+    {
+        $query->where('status', OrderStatus::Paid)->countedBetween($from, $to);
+    }
+
+    /** Cuándo cuenta la orden: al cobrarse o, si aún no, al tomarse. */
+    public function countedAt(): CarbonInterface
+    {
+        return $this->paid_at ?? $this->sold_at;
     }
 
     /** Hora en que el cliente lo espera: la de recogida o, si no hay, la del pedido. */

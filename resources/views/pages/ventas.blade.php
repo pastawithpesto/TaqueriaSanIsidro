@@ -44,8 +44,8 @@ new #[Title('Ventas')] class extends Component
         $day = $this->day();
 
         return Order::with(['items', 'payments'])
-            ->whereBetween('sold_at', [$day, $day->endOfDay()])
-            ->orderBy('sold_at')
+            ->countedBetween($day, $day->endOfDay())
+            ->orderByRaw('COALESCE(paid_at, sold_at)')
             ->get()
             ->each(fn ($o, $i) => $o->number = $i + 1)
             ->reverse()
@@ -94,11 +94,11 @@ new #[Title('Ventas')] class extends Component
 @endphp
 
 <div>
-    <x-page-header title="Ventas">
+    <x-page-header title="Ventas" tour="ventas">
         <x-slot:actions>
-            <a href="{{ route('corte') }}" wire:navigate class="btn"><x-icon name="banknote" class="size-4" /> Corte</a>
+            <a href="{{ route('corte') }}" wire:navigate class="btn" data-tour="corte"><x-icon name="banknote" class="size-4" /> Corte</a>
         </x-slot:actions>
-        <x-date-nav :max="today()->toDateString()" />
+        <x-date-nav :max="today()->toDateString()" data-tour="fecha" />
     </x-page-header>
 
     {{-- Mientras llega el nuevo día --}}
@@ -109,7 +109,7 @@ new #[Title('Ventas')] class extends Component
 
     <div wire:loading.remove.delay.short wire:target="date" class="space-y-4">
         @if ($this->orders->isNotEmpty())
-            <section class="card !p-5">
+            <section class="card !p-5" data-tour="ventas-dia">
                 <div class="flex items-end justify-between gap-3">
                     <div>
                         <p class="text-sm font-semibold text-muted">Vendido</p>
@@ -158,7 +158,7 @@ new #[Title('Ventas')] class extends Component
                         $isCancelled = $order->status === OrderStatus::Cancelled;
                         $cost = $order->items->sum(fn ($i) => $i->quantity * (float) $i->unit_cost);
                     @endphp
-                    <li wire:key="o-{{ $order->id }}" x-data="{ open: false }">
+                    <li wire:key="o-{{ $order->id }}" x-data="{ open: false }" @if ($loop->first) data-tour="orden" @endif>
                         @php
                             $isOpenOrder = $order->status === OrderStatus::Open;
                             $summary = $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ');
@@ -170,7 +170,7 @@ new #[Title('Ventas')] class extends Component
                                     {{ $order->label ?: $summary }}
                                 </span>
                                 <span class="mt-0.5 flex items-center gap-2 text-sm text-muted">
-                                    <span class="shrink-0">{{ $order->sold_at->format('g:i a') }}</span>
+                                    <span class="shrink-0">{{ $order->countedAt()->format('g:i a') }}</span>
                                     @if ($isOpenOrder)
                                         <span class="badge bg-limon-soft text-ink">Por cobrar</span>
                                     @elseif ($order->payment_method && $order->payment_method !== PaymentMethod::Cash)
@@ -234,7 +234,7 @@ new #[Title('Ventas')] class extends Component
                                         <button type="button" wire:click="restore({{ $order->id }})" class="btn">Restaurar venta</button>
                                     @else
                                         <button type="button" class="btn-quiet-danger -mr-2"
-                                                @click="if (await $store.confirm.ask({ title: '¿Cancelar la orden {{ $order->number }}?', message: 'Dejará de contar en ventas y en el corte. Puedes restaurarla después.', action: 'Cancelar orden', cancel: 'No' })) $wire.cancel({{ $order->id }})">
+                                                @click="if (await $store.confirm.ask({ title: '¿Cancelar la orden {{ $order->daily_number ?? $order->number }}?', message: 'Dejará de contar en ventas y en el corte. Puedes restaurarla después.', action: 'Cancelar orden', cancel: 'No' })) $wire.cancel({{ $order->id }})">
                                             <x-icon name="x" class="size-4" /> Cancelar venta
                                         </button>
                                     @endif
@@ -245,7 +245,7 @@ new #[Title('Ventas')] class extends Component
                 @endforeach
             </ul>
         @else
-            <x-empty icon="receipt" :title="$isToday ? 'Todavía no hay ventas hoy' : 'Sin ventas este día'">
+            <x-empty icon="receipt" :title="$isToday ? 'Todavía no hay ventas hoy' : 'Sin ventas este día'" data-tour="ventas-vacio">
                 @if ($isToday)
                     Cada pedido que cobres aparecerá aquí, con su hora y forma de pago.
                     <x-slot:action><a href="{{ route('vender') }}" wire:navigate class="btn-primary">Ir a vender</a></x-slot:action>

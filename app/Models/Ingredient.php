@@ -27,4 +27,14 @@ class Ingredient extends Model
     {
         return $this->hasMany(Expense::class);
     }
+
+    /** El costo sigue a la compra más reciente con cantidad. Si ya no queda ninguna, se deja como está. */
+    public function syncCostFromPurchases(): void
+    {
+        $latest = $this->expenses()->where('quantity', '>', 0)->orderByDesc('spent_on')->orderByDesc('id')->first();
+
+        if ($latest) {
+            $this->update(['cost_per_unit' => round((float) $latest->total / (float) $latest->quantity, 4)]);
+        }
+    }
 }

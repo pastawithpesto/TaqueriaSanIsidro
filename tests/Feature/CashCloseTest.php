@@ -80,4 +80,17 @@ class CashCloseTest extends TestCase
         $id = CashMovement::where('type', 'out')->value('id');
         Livewire::test('pages::corte')->call('deleteMovement', $id)->assertSet('movementsNet', 50.0);
     }
+
+    public function test_saving_counts_sales_made_after_the_page_was_opened(): void
+    {
+        $component = Livewire::test('pages::corte')->set('opening', '200');
+        Order::create(['status' => 'paid', 'payment_method' => 'cash', 'total' => 50, 'sold_at' => now(), 'paid_at' => now()])
+            ->payments()->create(['method' => 'cash', 'amount' => 50]);
+
+        $component->set('counted', '650')->call('save')->assertHasNoErrors();
+
+        $close = CashClose::sole();
+        $this->assertSame('650.00', $close->expected);
+        $this->assertSame('0.00', $close->difference);
+    }
 }

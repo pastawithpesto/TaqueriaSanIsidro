@@ -12,7 +12,14 @@ new #[Title('Pedidos')] class extends Component
     #[Computed]
     public function pending()
     {
-        return Order::with('items')->pending()->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
+        return Order::with('items')->pending()->dueBetween(today())->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
+    }
+
+    /** Guardados sin cobrar de días anteriores: ya no se preparan, falta cobrarlos o cancelarlos. */
+    #[Computed]
+    public function stale()
+    {
+        return Order::with('items')->where('status', OrderStatus::Open)->dueBetween(null, today())->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
     }
 
     #[Computed]
@@ -53,23 +60,23 @@ new #[Title('Pedidos')] class extends Component
     public function cancel(int $id): void
     {
         Order::whereKey($id)->where('status', OrderStatus::Open)->update(['status' => OrderStatus::Cancelled]);
-        unset($this->pending);
+        unset($this->pending, $this->stale);
         $this->dispatch('toast', message: 'Pedido cancelado');
     }
 };
 ?>
 
 <div wire:poll.15s.visible x-data="{ now: Date.now() }" x-init="setInterval(() => now = Date.now(), 30000)">
-    <x-page-header title="Pedidos">
+    <x-page-header title="Pedidos" tour="pedidos">
         <x-slot:actions>
-            <a href="{{ route('cocina') }}" class="btn"><x-icon name="flame" class="size-4" /> Cocina</a>
-            <a href="{{ route('vender') }}" wire:navigate class="btn-primary"><x-icon name="plus" class="size-4" /> Pedido</a>
+            <a href="{{ route('cocina') }}" class="btn" data-tour="cocina"><x-icon name="flame" class="size-4" /> Cocina</a>
+            <a href="{{ route('vender') }}" wire:navigate class="btn-primary" data-tour="nuevo-pedido"><x-icon name="plus" class="size-4" /> Pedido</a>
         </x-slot:actions>
     </x-page-header>
 
     <div class="space-y-6">
         @if ($this->pending->isEmpty())
-            <x-empty icon="orders" title="No hay pedidos pendientes">
+            <x-empty icon="orders" title="No hay pedidos pendientes" data-tour="pedidos-vacio">
                 Aquí aparecen los pedidos por entregar y los que guardaste sin cobrar, con su nombre e indicaciones.
                 <x-slot:action><a href="{{ route('vender') }}" wire:navigate class="btn-primary">Tomar un pedido</a></x-slot:action>
             </x-empty>
@@ -82,7 +89,7 @@ new #[Title('Pedidos')] class extends Component
                         $since = $order->sold_at->getTimestampMs();
                         $pickup = $order->pickup_at?->getTimestampMs();
                     @endphp
-                    <li wire:key="po-{{ $order->id }}" class="card flex flex-col !p-0">
+                    <li wire:key="po-{{ $order->id }}" class="card flex flex-col !p-0" @if ($loop->first) data-tour="pedido" @endif>
                         <div class="flex items-start gap-3 px-4 pt-4">
                             <span class="num grid size-12 shrink-0 place-items-center rounded-xl bg-limon text-2xl font-bold text-on-limon">{{ $order->daily_number }}</span>
                             <div class="min-w-0 flex-1">
@@ -166,7 +173,7 @@ new #[Title('Pedidos')] class extends Component
                             @endforeach
                         </ul>
 
-                        <div class="flex items-center gap-2 border-t border-line px-3 py-3">
+                        <div class="flex items-center gap-2 border-t border-line px-3 py-3" @if ($loop->first) data-tour="pedido-acciones" @endif>
                             @if ($open)
                                 <div x-data="{ menu: false }" class="relative">
                                     <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-icon" aria-label="Más opciones"><x-icon name="more" /></button>
@@ -195,9 +202,34 @@ new #[Title('Pedidos')] class extends Component
             </ul>
         @endif
 
+        @if ($this->stale->isNotEmpty())
+            <section class="space-y-2" x-data="{ open: false }" data-tour="pedidos-anteriores">
+                <button type="button" @click="open = !open" class="flex w-full items-center justify-between px-1" :aria-expanded="open">
+                    <h2 class="section-title">Sin cobrar de días anteriores</h2>
+                    <span class="flex items-center gap-1.5 text-sm text-muted">{{ $this->stale->count() }} <x-icon name="down" class="size-4 transition-transform" ::class="open && 'rotate-180'" /></span>
+                </button>
+                <ul class="list" x-show="open" x-collapse x-cloak>
+                    @foreach ($this->stale as $order)
+                        <li wire:key="ps-{{ $order->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
+                            <span class="num w-8 text-center text-lg font-bold text-muted">{{ $order->daily_number }}</span>
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate font-semibold">{{ $order->label ?: $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ') }}</span>
+                                <span class="block text-sm text-muted">{{ ucfirst($order->dueAt()->translatedFormat('l j M, g:i a')) }}, {{ money($order->total) }}</span>
+                            </span>
+                            <a href="{{ route('vender', ['orden' => $order->id, 'cobrar' => 1]) }}" wire:navigate class="btn !min-h-9 !px-3">Cobrar</a>
+                            <button type="button" class="btn-quiet size-10 justify-center !px-0 text-chile" aria-label="Cancelar pedido #{{ $order->daily_number }}"
+                                    @click="if (await $store.confirm.ask({ title: @js('¿Cancelar el pedido #'.$order->daily_number.'?'), message: 'No se ha cobrado. Se quitará de la lista.', action: 'Cancelar pedido', cancel: 'No' })) $wire.cancel({{ $order->id }})">
+                                <x-icon name="x" class="size-4" />
+                            </button>
+                        </li>
+                    @endforeach
+                </ul>
+            </section>
+        @endif
+
         @if ($this->delivered->isNotEmpty())
-            <section class="space-y-2" x-data="{ open: false }">
-                <button type="button" @click="open = !open" class="flex w-full items-center justify-between px-1">
+            <section class="space-y-2" x-data="{ open: false }" data-tour="entregados">
+                <button type="button" @click="open = !open" class="flex w-full items-center justify-between px-1" :aria-expanded="open">
                     <h2 class="section-title">Entregados hoy</h2>
                     <span class="flex items-center gap-1.5 text-sm text-muted">{{ $this->delivered->count() }} <x-icon name="down" class="size-4 transition-transform" ::class="open && 'rotate-180'" /></span>
                 </button>

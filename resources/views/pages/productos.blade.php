@@ -32,16 +32,24 @@ new #[Title('Productos')] class extends Component
     /** Grupos para elegir (ej. Refresco): @var array<int, array{id: ?int, name: string, required: bool, choices: array}> */
     public array $options = [];
 
+    /** En el mismo orden que Vender, para poder acomodarlos arrastrando. */
     #[Computed]
     public function products()
     {
-        return Product::with('ingredients')->orderByDesc('active')->orderBy('sort_order')->orderBy('name')->get();
+        return Product::with('ingredients')->withExists('orderItems')->orderBy('sort_order')->orderBy('name')->get();
     }
 
     #[Computed]
     public function ingredients()
     {
         return Ingredient::where('active', true)->orderBy('name')->get()->keyBy('id');
+    }
+
+    /** Todos, para calcular el costo de recetas que aún usan un insumo inactivo. */
+    #[Computed]
+    public function allIngredients()
+    {
+        return Ingredient::orderBy('name')->get()->keyBy('id');
     }
 
     #[Computed]
@@ -158,21 +166,23 @@ new #[Title('Productos')] class extends Component
             ->filter(fn ($g) => $g['name'] !== '' && $g['choices'])
             ->values()->all();
 
+        $this->category = trim((string) $this->category) ?: null;
+
         $data = $this->validate([
             'name' => ['required', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:255'],
-            'price' => ['required', 'numeric', 'min:0'],
+            'price' => ['required', 'numeric', 'min:0', 'max:99999'],
             'active' => ['boolean'],
             'sort_order' => ['integer', 'min:0'],
             'recipe.*.ingredient_id' => ['required', 'exists:ingredients,id'],
-            'recipe.*.quantity' => ['required', 'numeric', 'gt:0'],
+            'recipe.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999'],
             'extras.*.name' => ['required', 'string', 'max:60'],
-            'extras.*.price' => ['required', 'numeric', 'min:0'],
+            'extras.*.price' => ['required', 'numeric', 'min:0', 'max:99999'],
             'extras.*.ingredient_id' => ['nullable', 'exists:ingredients,id'],
-            'extras.*.quantity' => ['nullable', 'required_with:extras.*.ingredient_id', 'numeric', 'gt:0'],
+            'extras.*.quantity' => ['nullable', 'required_with:extras.*.ingredient_id', 'numeric', 'gt:0', 'max:99999'],
             'options.*.name' => ['required', 'string', 'max:40'],
             'options.*.choices.*.name' => ['required', 'string', 'max:40'],
-            'options.*.choices.*.price' => ['required', 'numeric', 'min:0'],
+            'options.*.choices.*.price' => ['required', 'numeric', 'min:0', 'max:99999'],
         ]);
 
         $product = DB::transaction(function () use ($data) {
@@ -213,13 +223,58 @@ new #[Title('Productos')] class extends Component
         $this->dispatch('toast', message: 'Producto guardado');
     }
 
-    /** Borra el producto. Las ventas pasadas conservan su nombre y precio. */
+    /**
+     * Borra un producto que nunca se vendió. Si tiene ventas solo se oculta: la lista de compras
+     * y los pedidos guardados lo siguen necesitando.
+     */
     public function delete(int $id): void
     {
-        Product::whereKey($id)->delete();
+        $product = Product::withExists('orderItems')->findOrFail($id);
+
+        if ($product->order_items_exists) {
+            $product->update(['active' => false]);
+            $message = 'Tiene ventas, así que se ocultó en lugar de eliminarse';
+        } else {
+            $product->delete();
+            $message = 'Producto eliminado';
+        }
+
         $this->resetForm();
         unset($this->products, $this->categories);
-        $this->dispatch('toast', message: 'Producto eliminado');
+        $this->dispatch('toast', message: $message);
+    }
+
+    /** Mueve un producto a otra posición dentro de su categoría. Vender sigue este orden. */
+    public function sortProduct(int $id, int $position): void
+    {
+        $product = Product::findOrFail($id);
+        $all = Product::orderBy('sort_order')->orderBy('name')->get();
+        $sameCategory = fn (Product $p) => ($p->category ?: null) === ($product->category ?: null);
+
+        $group = $all->filter($sameCategory)->reject(fn (Product $p) => $p->is($product))->values();
+        $group->splice(max(0, min($position, $group->count())), 0, [$product]);
+
+        // Los de la categoría se reacomodan en los mismos lugares que ocupaban en la lista completa.
+        $all->map(fn (Product $p) => $sameCategory($p) ? $group->shift() : $p)
+            ->each(function (Product $p, int $i) {
+                if ($p->sort_order !== $i) {
+                    $p->update(['sort_order' => $i]);
+                }
+            });
+
+        unset($this->products);
+    }
+
+    /** Subir (-1) o bajar (1) un lugar, para quien no puede arrastrar. */
+    public function move(int $id, int $direction): void
+    {
+        $product = Product::findOrFail($id);
+        $position = Product::orderBy('sort_order')->orderBy('name')->get()
+            ->filter(fn (Product $p) => ($p->category ?: null) === ($product->category ?: null))
+            ->values()
+            ->search(fn (Product $p) => $p->is($product));
+
+        $this->sortProduct($id, $position + ($direction < 0 ? -1 : 1));
     }
 
     public function toggle(int $id): void
@@ -233,7 +288,7 @@ new #[Title('Productos')] class extends Component
 
 <div x-data="{
         sheet: $wire.$entangle('showForm'),
-        ings: @js($this->ingredients->map(fn ($i) => ['name' => $i->name, 'unit' => $i->unit, 'cost' => (float) $i->cost_per_unit])),
+        ings: @js($this->allIngredients->map(fn ($i) => ['name' => $i->name, 'unit' => $i->unit, 'cost' => (float) $i->cost_per_unit, 'active' => $i->active])),
         newIng: '',
         newQty: '',
         addError: '',
@@ -268,9 +323,9 @@ new #[Title('Productos')] class extends Component
             return { cost, price, profit, margin: price > 0 ? Math.round(profit / price * 100) : null };
         },
      }">
-    <x-page-header title="Productos">
+    <x-page-header title="Productos" tour="productos">
         <x-slot:actions>
-            <button type="button" @click="sheet = true; $wire.create()" class="btn-primary"><x-icon name="plus" class="size-4" /> Producto</button>
+            <button type="button" @click="sheet = true; $wire.create()" class="btn-primary" data-tour="nuevo-producto"><x-icon name="plus" class="size-4" /> Producto</button>
         </x-slot:actions>
     </x-page-header>
 
@@ -291,7 +346,7 @@ new #[Title('Productos')] class extends Component
         @foreach ($this->products->groupBy(fn ($p) => $p->category ?: 'Sin categoría') as $cat => $group)
             <section class="space-y-2" wire:key="cat-{{ $cat }}">
                 <h2 class="section-title px-1">{{ $cat }}</h2>
-                <ul class="list">
+                <ul class="list" wire:sort="sortProduct">
                     @foreach ($group as $p)
                         @php
                             $cost = $p->unitCost();
@@ -299,7 +354,13 @@ new #[Title('Productos')] class extends Component
                             $margin = $price > 0 ? ($price - $cost) / $price * 100 : 0;
                             $hasRecipe = $p->ingredients->isNotEmpty();
                         @endphp
-                        <li wire:key="prod-{{ $p->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
+                        <li wire:key="prod-{{ $p->id }}" wire:sort:item="{{ $p->id }}" class="flex items-center gap-2 py-3 pr-2 pl-2" @if ($loop->first) data-tour="producto" @endif>
+                            {{-- La columna del asa se reserva siempre para que los nombres queden alineados entre categorías. --}}
+                            @if ($group->count() > 1)
+                                <span wire:sort:handle data-tour="producto-orden" class="grid h-10 w-6 shrink-0 cursor-grab touch-none place-items-center text-muted active:cursor-grabbing" title="Arrastra para acomodar"><x-icon name="grip" class="size-4" /></span>
+                            @else
+                                <span class="w-6 shrink-0"></span>
+                            @endif
                             <button type="button" @click="sheet = true; $wire.edit({{ $p->id }})" class="min-w-0 flex-1 text-left">
                                 <span @class(['block truncate font-semibold', 'text-muted' => ! $p->active])>{{ $p->name }}</span>
                                 <span class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
@@ -322,17 +383,25 @@ new #[Title('Productos')] class extends Component
                             </button>
                             <span class="num text-[1.375rem] font-bold">{{ money($price) }}</span>
                             <div x-data="{ menu: false }" class="relative">
-                                <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $p->name }}"><x-icon name="more" /></button>
+                                <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $p->name }}" @if ($loop->first) data-tour="producto-menu" @endif><x-icon name="more" /></button>
                                 <div x-show="menu" x-cloak x-transition.origin.top.right class="menu" @click="menu = false">
                                     <button type="button" @click="sheet = true; $wire.edit({{ $p->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
                                     <button type="button" @click="sheet = true; $wire.duplicate({{ $p->id }})"><x-icon name="copy" class="size-4 text-muted" /> Duplicar</button>
+                                    @unless ($loop->first)
+                                        <button type="button" wire:click="move({{ $p->id }}, -1)"><x-icon name="chevron-up" class="size-4 text-muted" /> Subir</button>
+                                    @endunless
+                                    @unless ($loop->last)
+                                        <button type="button" wire:click="move({{ $p->id }}, 1)"><x-icon name="down" class="size-4 text-muted" /> Bajar</button>
+                                    @endunless
                                     <button type="button" wire:click="toggle({{ $p->id }})">
                                         <x-icon :name="$p->active ? 'eye-off' : 'eye'" class="size-4 text-muted" /> {{ $p->active ? 'Ocultar en Vender' : 'Mostrar en Vender' }}
                                     </button>
-                                    <button type="button" class="text-chile"
-                                            @click="if (await $store.confirm.ask({ title: @js('¿Eliminar '.$p->name.'?'), message: 'Las ventas pasadas se conservan. Si solo quieres dejar de venderlo, mejor ocúltalo.', action: 'Eliminar' })) $wire.delete({{ $p->id }})">
-                                        <x-icon name="trash" class="size-4" /> Eliminar
-                                    </button>
+                                    @unless ($p->order_items_exists)
+                                        <button type="button" class="text-chile"
+                                                @click="if (await $store.confirm.ask({ title: @js('¿Eliminar '.$p->name.'?'), message: 'Nunca se ha vendido. Si solo quieres dejar de venderlo, mejor ocúltalo.', action: 'Eliminar' })) $wire.delete({{ $p->id }})">
+                                            <x-icon name="trash" class="size-4" /> Eliminar
+                                        </button>
+                                    @endunless
                                 </div>
                             </div>
                         </li>
@@ -388,7 +457,7 @@ new #[Title('Productos')] class extends Component
                                 :aria-label="'Se puede pedir sin ' + (ings[row.ingredient_id]?.name ?? '')">
                             <x-icon name="x" class="size-4" />
                         </button>
-                        <span class="min-w-0 flex-1 truncate text-[15px] font-medium" x-text="ings[row.ingredient_id]?.name ?? 'Insumo inactivo'"></span>
+                        <span class="min-w-0 flex-1 truncate text-[15px] font-medium" x-text="(ings[row.ingredient_id]?.name ?? 'Insumo borrado') + (ings[row.ingredient_id]?.active === false ? ' (inactivo)' : '')"></span>
                         <input type="number" step="any" inputmode="decimal" x-model="row.quantity" class="input !min-h-10 w-24 !px-2.5 text-right" :aria-label="'Cantidad de ' + (ings[row.ingredient_id]?.name ?? '')">
                         <span class="w-12 text-sm text-muted" x-text="ings[row.ingredient_id]?.unit"></span>
                         <button type="button" @click="remove(index)" class="btn-quiet size-9 justify-center !px-0" :aria-label="'Quitar ' + (ings[row.ingredient_id]?.name ?? '')"><x-icon name="x" class="size-4" /></button>
@@ -483,14 +552,14 @@ new #[Title('Productos')] class extends Component
                                 <button type="button" @click="removeExtra(i)" class="btn-quiet size-11 justify-center !px-0" aria-label="Quitar extra"><x-icon name="x" class="size-4" /></button>
                             </div>
                             <div class="flex gap-2">
-                                <select x-model="extra.ingredient_id" class="input !min-h-10 flex-1 text-sm" aria-label="Insumo que usa">
+                                <select x-model="extra.ingredient_id" class="input !min-h-10 flex-1" aria-label="Insumo que usa">
                                     <option value="">No usa insumo</option>
                                     @foreach ($this->ingredients as $ing)
                                         <option value="{{ $ing->id }}">Usa {{ $ing->name }}</option>
                                     @endforeach
                                 </select>
                                 <div class="relative w-28" x-show="extra.ingredient_id">
-                                    <input type="number" step="any" min="0" inputmode="decimal" x-model="extra.quantity" class="input !min-h-10 pr-11 text-sm" placeholder="Cant." aria-label="Cantidad de insumo">
+                                    <input type="number" step="any" min="0" inputmode="decimal" x-model="extra.quantity" class="input !min-h-10 pr-11" placeholder="Cant." aria-label="Cantidad de insumo">
                                     <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted" x-text="ings[extra.ingredient_id]?.unit ?? ''"></span>
                                 </div>
                             </div>

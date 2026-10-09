@@ -145,4 +145,96 @@ class SalesTest extends TestCase
 
         $this->assertSame(OrderStatus::Cancelled, $order->fresh()->status);
     }
+
+    public function test_undo_brings_back_delivery_discount_payment_and_number(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::vender')
+            ->set('lines', [$this->line($taco, 3)])
+            ->set('service', 'delivery')
+            ->set('address', 'Calle 5 #12')
+            ->set('phone', '8681234567')
+            ->set('deliveryFee', '25')
+            ->set('discount', '10')
+            ->set('tip', '5')
+            ->set('method', 'transfer')
+            ->set('reference', 'F-1')
+            ->call('charge')
+            ->call('undo')
+            ->assertSet('service', 'delivery')
+            ->assertSet('address', 'Calle 5 #12')
+            ->assertSet('phone', '8681234567')
+            ->assertSet('deliveryFee', '25')
+            ->assertSet('discount', '10')
+            ->assertSet('tip', '5')
+            ->assertSet('method', 'transfer')
+            ->assertSet('reference', 'F-1')
+            ->assertDispatched('order-restored', later: false, discount: true)
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        $this->assertSame([1, 1], Order::orderBy('id')->pluck('daily_number')->all());
+        $this->assertSame([OrderStatus::Cancelled, OrderStatus::Paid], Order::orderBy('id')->pluck('status')->all());
+    }
+
+    public function test_product_hidden_while_in_the_cart_blocks_the_charge(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $component = Livewire::test('pages::vender')->set('lines', [$this->line($taco, 1)]);
+        $taco->update(['active' => false]);
+
+        $component->call('charge')->assertReturned(['ok' => false, 'error' => 'Ya no se vende: Taco. Quítalo del pedido.']);
+
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_amount_above_the_limit_is_rejected(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::vender')
+            ->set('lines', [$this->line($taco, 1)])
+            ->set('tip', '500000')
+            ->call('charge')
+            ->assertReturned(['ok' => false, 'error' => 'Revisa la propina: el monto es demasiado alto.']);
+
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_long_texts_are_cut_to_fit(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::vender')
+            ->set('lines', [$this->line($taco, 1)])
+            ->set('label', str_repeat('a', 80))
+            ->set('method', 'transfer')
+            ->set('reference', str_repeat('9', 300))
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        $order = Order::sole();
+        $this->assertSame(60, mb_strlen($order->label));
+        $this->assertSame(255, mb_strlen($order->payment_reference));
+    }
+
+    public function test_order_saved_yesterday_and_charged_today_counts_today(): void
+    {
+        $this->travelTo(today()->setTime(12, 0));
+        Order::create(['daily_number' => 7, 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 80, 'sold_at' => now()->subDay(), 'paid_at' => now()]);
+
+        Livewire::test('pages::ventas')->assertSee('$80');
+        Livewire::test('pages::ventas')->set('date', today()->subDay()->toDateString())->assertDontSee('$80');
+        $this->assertEquals(80, Livewire::test('pages::resumen')->set('range', 'today')->get('totals')['sales']);
+    }
+
+    public function test_fresh_catalog_reflects_price_changes(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $component = Livewire::test('pages::vender');
+        $taco->update(['price' => 22]);
+
+        $component->call('freshCatalog')->assertReturned(fn ($fresh) => (float) $fresh['catalog'][$taco->id]['price'] === 22.0);
+    }
 }

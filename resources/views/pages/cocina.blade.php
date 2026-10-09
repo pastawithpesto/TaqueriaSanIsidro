@@ -15,7 +15,8 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
     #[Computed]
     public function queue()
     {
-        return Order::with('items')->pending()
+        // Solo lo de hoy: lo que se recoge mañana o quedó sin cobrar de otro día no se prepara ahora.
+        return Order::with('items')->pending()->dueBetween(today(), today()->addDay())
             ->whereNull('ready_at')->whereNull('delivered_at')
             ->orderByRaw('COALESCE(pickup_at, sold_at)')
             ->get();
@@ -24,7 +25,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
     #[Computed]
     public function ready()
     {
-        return Order::pending()->whereNotNull('ready_at')->whereNull('delivered_at')->orderByDesc('ready_at')->limit(8)->get();
+        return Order::pending()->dueBetween(today(), today()->addDay())->whereNotNull('ready_at')->whereNull('delivered_at')->orderByDesc('ready_at')->limit(8)->get();
     }
 
     public function markReady(int $id): void
@@ -54,8 +55,10 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
      class="flex min-h-dvh flex-col">
     <header class="flex items-center justify-between gap-4 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
         <div class="flex items-center gap-3">
-            <a href="{{ route('pedidos') }}" class="grid size-11 place-items-center rounded-xl bg-white/10 hover:bg-white/15" aria-label="Volver a Pedidos"><x-icon name="left" /></a>
+            <a href="{{ route('pedidos') }}" class="grid size-11 place-items-center rounded-xl bg-white/10 hover:bg-white/15" aria-label="Volver a Pedidos" data-tour="cocina-volver"><x-icon name="left" /></a>
             <h1 class="font-display text-4xl font-bold">Cocina</h1>
+            <button type="button" data-tour-start="cocina" class="grid size-11 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white"
+                    aria-label="Cómo funciona esta pantalla" title="Cómo funciona esta pantalla"><x-icon name="help" class="size-6" /></button>
             <span class="num rounded-full bg-[#ffda58] px-3 py-0.5 text-2xl font-bold text-[#4e2c11]">{{ $this->queue->count() }}</span>
         </div>
         <span class="num text-3xl font-bold text-white/70" x-text="new Date(now).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })"></span>
@@ -77,7 +80,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                         $since = $order->sold_at->getTimestampMs();
                         $pickup = $order->pickup_at?->getTimestampMs();
                     @endphp
-                    <article wire:key="k-{{ $order->id }}" class="flex flex-col rounded-3xl bg-[#2b1d12] ring-1 ring-white/10">
+                    <article wire:key="k-{{ $order->id }}" class="flex flex-col rounded-3xl bg-[#2b1d12] ring-1 ring-white/10" @if ($loop->first) data-tour="cocina-pedido" @endif>
                         <div class="flex items-start gap-3 p-4 pb-3">
                             <span class="num grid size-14 shrink-0 place-items-center rounded-2xl bg-[#ffda58] text-3xl font-bold text-[#4e2c11]">{{ $order->daily_number }}</span>
                             <div class="min-w-0 flex-1">
@@ -90,7 +93,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                                         <span class="rounded-md bg-[#fe964d] px-2 py-0.5 font-semibold text-[#4e2c11]">Recoge {{ $order->pickup_at->format('g:i a') }}</span>
                                     @else
                                         <span :class="(now - {{ $since }}) > 15 * 60000 ? 'font-bold text-[#ff6b5e]' : 'text-white/60'"
-                                              x-text="(() => { const m = Math.max(0, Math.floor((now - {{ $since }}) / 60000)); return m < 1 ? 'recién' : 'hace ' + m + ' min' })()"></span>
+                                              x-text="(() => { const m = Math.max(0, Math.floor((now - {{ $since }}) / 60000)); return m < 1 ? 'recién' : (m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min') })()"></span>
                                     @endif
                                 </p>
                             </div>
@@ -122,7 +125,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                             @endforeach
                         </ul>
                         <div class="p-3 pt-0">
-                            <button type="button" wire:click="markReady({{ $order->id }})" class="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl bg-[#17803d] text-2xl font-bold text-white hover:bg-[#156f35] motion-safe:active:scale-[0.98]">
+                            <button type="button" wire:click="markReady({{ $order->id }})" @if ($loop->first) data-tour="cocina-listo" @endif class="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl bg-[#17803d] text-2xl font-bold text-white hover:bg-[#156f35] motion-safe:active:scale-[0.98]">
                                 <x-icon name="check" class="size-7" /> Listo
                             </button>
                         </div>
@@ -133,7 +136,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
     </main>
 
     @if ($this->ready->isNotEmpty())
-        <footer class="fixed inset-x-0 bottom-0 flex items-center gap-2 overflow-x-auto border-t border-white/10 bg-[#120b06]/95 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+        <footer data-tour="cocina-listos" class="fixed inset-x-0 bottom-0 flex items-center gap-2 overflow-x-auto border-t border-white/10 bg-[#120b06]/95 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
             <span class="shrink-0 text-sm font-semibold text-white/60">Listos:</span>
             @foreach ($this->ready as $order)
                 <button type="button" wire:click="unready({{ $order->id }})" title="Regresar a preparación"

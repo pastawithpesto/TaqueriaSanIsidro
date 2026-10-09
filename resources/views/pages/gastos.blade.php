@@ -60,10 +60,13 @@ new #[Title('Gastos')] class extends Component
         return ucfirst($this->start()->translatedFormat('F Y'));
     }
 
+    /** Insumos activos y, al editar, el de ese gasto aunque ya esté inactivo. */
     #[Computed]
     public function ingredients()
     {
-        return Ingredient::where('active', true)->orderBy('name')->get()->keyBy('id');
+        return Ingredient::where('active', true)
+            ->when($this->ingredient_id, fn ($q) => $q->orWhere('id', $this->ingredient_id))
+            ->orderBy('name')->get()->keyBy('id');
     }
 
     #[Computed]
@@ -121,30 +124,21 @@ new #[Title('Gastos')] class extends Component
         }
 
         $data = $this->validate([
-            'spent_on' => ['required', 'date'],
+            'spent_on' => ['required', 'date', 'before_or_equal:today'],
             'category' => ['required', Rule::enum(ExpenseCategory::class)],
             'ingredient_id' => ['nullable', 'exists:ingredients,id'],
             'description' => ['nullable', 'string', 'max:255'],
             'supplier' => ['nullable', 'string', 'max:255'],
-            'quantity' => [$this->ingredient_id ? 'required' : 'nullable', 'numeric', 'gt:0'],
-            'total' => ['required', 'numeric', 'gt:0'],
+            'quantity' => [$this->ingredient_id ? 'required' : 'nullable', 'numeric', 'gt:0', 'max:999999'],
+            'total' => ['required', 'numeric', 'gt:0', 'max:9999999'],
             'from_cash' => ['boolean'],
         ]);
 
+        $previousIngredient = $this->editingId ? Expense::whereKey($this->editingId)->value('ingredient_id') : null;
         $expense = Expense::updateOrCreate(['id' => $this->editingId], $data + ['user_id' => auth()->id()]);
 
-        // El costo del insumo sigue a su compra más reciente.
-        if ($expense->ingredient_id && (float) $expense->quantity > 0) {
-            $latest = Expense::where('ingredient_id', $expense->ingredient_id)
-                ->whereNotNull('quantity')
-                ->orderByDesc('spent_on')->orderByDesc('id')
-                ->first();
-
-            if ($latest?->is($expense)) {
-                Ingredient::whereKey($expense->ingredient_id)
-                    ->update(['cost_per_unit' => round((float) $expense->total / (float) $expense->quantity, 4)]);
-            }
-        }
+        // El costo del insumo sigue a su compra más reciente; si el gasto cambió de insumo, también se recalcula el anterior.
+        Ingredient::whereIn('id', array_filter([$previousIngredient, $expense->ingredient_id]))->get()->each->syncCostFromPurchases();
 
         $message = $this->editingId ? 'Gasto actualizado' : 'Gasto guardado';
         $this->resetForm();
@@ -154,7 +148,9 @@ new #[Title('Gastos')] class extends Component
 
     public function delete(int $id): void
     {
-        Expense::whereKey($id)->delete();
+        $expense = Expense::findOrFail($id);
+        $expense->delete();
+        $expense->ingredient?->syncCostFromPurchases();
         unset($this->expenses);
         $this->dispatch('toast', message: 'Gasto borrado');
     }
@@ -180,11 +176,11 @@ new #[Title('Gastos')] class extends Component
             return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: n % 1 ? 2 : 0 }).format(n) + ' por ' + this.unit;
         },
      }">
-    <x-page-header title="Gastos">
+    <x-page-header title="Gastos" tour="gastos">
         <x-slot:actions>
-            <button type="button" @click="sheet = true" class="btn-primary"><x-icon name="plus" class="size-4" /> Gasto</button>
+            <button type="button" @click="sheet = true" class="btn-primary" data-tour="nuevo-gasto"><x-icon name="plus" class="size-4" /> Gasto</button>
         </x-slot:actions>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2" data-tour="mes">
             <button type="button" wire:click="shiftMonth(-1)" class="btn-icon" aria-label="Mes anterior"><x-icon name="left" /></button>
             <p class="flex min-h-11 flex-1 items-center justify-center rounded-xl border border-line bg-surface font-semibold">{{ $this->monthLabel }}</p>
             <button type="button" wire:click="shiftMonth(1)" class="btn-icon" aria-label="Mes siguiente" @disabled($month >= today()->format('Y-m'))><x-icon name="right" /></button>
@@ -197,7 +193,7 @@ new #[Title('Gastos')] class extends Component
     </div>
 
     <div wire:loading.remove.delay.short wire:target="shiftMonth" class="space-y-5">
-        <section class="card !p-5">
+        <section class="card !p-5" data-tour="gastos-mes">
             <p class="text-sm font-semibold text-muted">Gastado en el mes</p>
             <p class="num text-[3rem] leading-none font-bold">{{ money($total) }}</p>
             @if ($byCategory->isNotEmpty())
@@ -236,7 +232,7 @@ new #[Title('Gastos')] class extends Component
                                     $e->ingredient && $e->description ? $e->description : null,
                                 ]);
                             @endphp
-                            <li wire:key="e-{{ $e->id }}" class="flex items-center gap-1 pr-2">
+                            <li wire:key="e-{{ $e->id }}" class="flex items-center gap-1 pr-2" @if ($loop->first) data-tour="gasto" @endif>
                                 <button type="button" @click="sheet = true; $wire.edit({{ $e->id }})" class="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 text-left">
                                     <span class="grid size-10 shrink-0 place-items-center rounded-xl {{ $e->category->tone() }}"><x-icon :name="$e->category->icon()" class="size-5" /></span>
                                     <span class="min-w-0 flex-1">

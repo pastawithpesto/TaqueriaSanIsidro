@@ -331,4 +331,70 @@ class OrderFlowTest extends TestCase
         $this->assertSame($coca->id, $groups[0]->choices[0]->id);
         $this->assertFalse($groups[1]->required);
     }
+
+    protected function openOrder(array $attributes = []): Order
+    {
+        $order = Order::create($attributes + ['daily_number' => 1, 'status' => OrderStatus::Open, 'label' => 'Juan', 'total' => 39, 'sold_at' => now()]);
+        $order->items()->create(['product_id' => $this->torta->id, 'product_name' => 'Torta', 'quantity' => 1, 'unit_price' => 39, 'unit_cost' => 0, 'subtotal' => 39]);
+
+        return $order;
+    }
+
+    public function test_order_already_charged_on_another_device_is_not_charged_twice(): void
+    {
+        $order = $this->openOrder();
+        $tablet = Livewire::withQueryParams(['orden' => $order->id])->test('pages::vender');
+
+        Livewire::withQueryParams(['orden' => $order->id])->test('pages::vender')->call('charge')->assertReturned(['ok' => true]);
+        $tablet->call('charge')
+            ->assertReturned(['ok' => false, 'closed' => true])
+            ->assertSet('orderId', null)
+            ->assertSet('lines', [])
+            ->assertDispatched('toast', message: 'Ese pedido ya se cobró o se canceló en otro dispositivo.', type: 'error');
+
+        $this->assertSame(1, Order::count());
+        $this->assertSame(1, $order->payments()->count());
+    }
+
+    public function test_adding_items_to_a_ready_order_sends_it_back_to_the_kitchen(): void
+    {
+        $order = $this->openOrder(['label' => 'Carro azul', 'ready_at' => now(), 'delivered_at' => now()]);
+
+        Livewire::withQueryParams(['orden' => $order->id])->test('pages::vender')->set('lines.0.qty', 3)->call('saveOpen');
+
+        $this->assertNull($order->fresh()->ready_at);
+        $this->assertNull($order->fresh()->delivered_at);
+        Livewire::test('pages::cocina')->assertSee('Carro azul');
+    }
+
+    public function test_charging_a_ready_order_without_changes_keeps_it_ready(): void
+    {
+        $order = $this->openOrder(['ready_at' => now()]);
+
+        Livewire::withQueryParams(['orden' => $order->id])->test('pages::vender')->call('charge')->assertReturned(['ok' => true]);
+
+        $this->assertNotNull($order->fresh()->ready_at);
+    }
+
+    public function test_unpaid_orders_from_previous_days_leave_the_kitchen_and_are_listed_apart(): void
+    {
+        $this->travelTo(today()->setTime(12, 0));
+        $old = $this->openOrder(['label' => 'Carro de ayer', 'sold_at' => now()->subDay()]);
+        $this->openOrder(['daily_number' => 2, 'label' => 'Carro de hoy']);
+
+        Livewire::test('pages::cocina')->assertSee('Carro de hoy')->assertDontSee('Carro de ayer');
+        Livewire::test('pages::pedidos')
+            ->assertSet('pending', fn ($orders) => $orders->pluck('label')->all() === ['Carro de hoy'])
+            ->assertSet('stale', fn ($orders) => $orders->pluck('id')->all() === [$old->id])
+            ->assertSee('Sin cobrar de días anteriores');
+    }
+
+    public function test_pickup_for_tomorrow_is_not_cooked_today(): void
+    {
+        $this->travelTo(today()->setTime(12, 0));
+        $this->openOrder(['label' => 'Para mañana', 'pickup_at' => now()->addDay()]);
+
+        Livewire::test('pages::cocina')->assertDontSee('Para mañana');
+        Livewire::test('pages::pedidos')->assertSee('Para mañana');
+    }
 }

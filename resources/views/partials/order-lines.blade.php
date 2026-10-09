@@ -5,7 +5,7 @@
             <button type="button" @click="edit(i)" class="flex w-full items-start gap-3 py-2.5 text-left">
                 <span class="num w-7 shrink-0 text-2xl leading-none font-bold text-chile" x-text="line.qty"></span>
                 <span class="min-w-0 flex-1">
-                    <span class="block text-[15px] font-semibold" x-text="catalog[line.product_id]?.name"></span>
+                    <span class="block text-[15px] font-semibold" :class="! catalog[line.product_id] && 'text-chile'" x-text="catalog[line.product_id]?.name ?? 'Ya no está a la venta'"></span>
                     <span class="mt-0.5 flex flex-wrap gap-1">
                         <span x-show="mods(line).courtesy" class="badge bg-ink text-bg">Cortesía</span>
                         <template x-for="c in mods(line).choices" :key="c">

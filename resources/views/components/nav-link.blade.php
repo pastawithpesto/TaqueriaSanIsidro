@@ -1,6 +1,6 @@
 @props(['route', 'icon', 'count' => 0])
 @php $active = request()->routeIs($route); @endphp
-<a href="{{ route($route) }}" wire:navigate.hover
+<a href="{{ route($route) }}" wire:navigate.hover {{ $attributes }}
    @class([
        'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-semibold',
        'bg-chile text-white shadow-sm' => $active,

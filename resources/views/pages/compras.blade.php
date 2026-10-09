@@ -85,8 +85,8 @@ new #[Title('Lista de compras')] class extends Component
 ?>
 
 <div>
-    <x-page-header title="Lista de compras">
-        <x-date-nav />
+    <x-page-header title="Lista de compras" tour="compras">
+        <x-date-nav data-tour="fecha" />
     </x-page-header>
 
     <div class="mx-auto max-w-xl space-y-4">
@@ -96,12 +96,12 @@ new #[Title('Lista de compras')] class extends Component
 
         <div wire:loading.remove.delay.short wire:target="date" class="space-y-4">
             @if (! $this->hasRecipes)
-                <x-empty icon="cart" title="Faltan las recetas">
+                <x-empty icon="cart" title="Faltan las recetas" data-tour="compras-vacio">
                     La lista se calcula con lo que lleva cada producto. Arma las recetas en Productos y vuelve aquí.
                     <x-slot:action><a href="{{ route('productos') }}" wire:navigate class="btn-primary">Ir a Productos</a></x-slot:action>
                 </x-empty>
             @elseif ($this->rows->isEmpty())
-                <x-empty icon="cart" title="Todavía no hay suficientes ventas">
+                <x-empty icon="cart" title="Todavía no hay suficientes ventas" data-tour="compras-vacio">
                     Cuando tengas unos días de ventas, aquí verás cuánto comprar de cada insumo según lo que normalmente usas.
                 </x-empty>
             @else
@@ -112,13 +112,13 @@ new #[Title('Lista de compras')] class extends Component
 
                 <div class="flex items-center justify-between px-1">
                     <h2 class="section-title">Comprar</h2>
-                    <label class="flex cursor-pointer items-center gap-2.5 text-sm font-semibold">
+                    <label class="flex cursor-pointer items-center gap-2.5 text-sm font-semibold" data-tour="compras-extra">
                         10% extra por si acaso
                         <input type="checkbox" wire:model.live="buffer" class="switch">
                     </label>
                 </div>
 
-                <ul class="list">
+                <ul class="list" data-tour="compras-lista">
                     @foreach ($this->rows as $row)
                         <li class="flex items-center gap-3 px-4 py-3">
                             <span class="min-w-0 flex-1 truncate font-semibold">{{ $row['name'] }}</span>
@@ -135,7 +135,7 @@ new #[Title('Lista de compras')] class extends Component
                     <span class="num text-[2.25rem] leading-none font-bold">{{ money(round($this->rows->sum('cost'))) }}</span>
                 </div>
 
-                <div wire:key="share-{{ $date }}-{{ (int) $buffer }}" x-data="{ text: @js($this->shareText) }" class="grid grid-cols-2 gap-2">
+                <div wire:key="share-{{ $date }}-{{ (int) $buffer }}" x-data="{ text: @js($this->shareText) }" class="grid grid-cols-2 gap-2" data-tour="compras-compartir">
                     <button type="button" class="btn btn-lg"
                             @click="navigator.clipboard?.writeText(text).then(() => $dispatch('toast', { message: 'Lista copiada' }))">
                         <x-icon name="copy" class="size-4" /> Copiar

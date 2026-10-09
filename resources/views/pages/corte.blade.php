@@ -33,6 +33,9 @@ new #[Title('Corte de caja')] class extends Component
 
     public float $tips = 0;
 
+    /** Propinas de ventas pagadas en efectivo o mixto: son las que pueden estar en la caja. */
+    public float $cashTips = 0;
+
     /** Formulario de movimiento de caja. */
     public string $moveType = 'out';
 
@@ -118,8 +121,16 @@ new #[Title('Corte de caja')] class extends Component
         $this->cashSales = (float) (clone $payments)->where('method', 'cash')->sum('amount');
         $this->otherSales = (float) (clone $payments)->where('method', '!=', 'cash')->sum('amount');
         $this->tips = (float) Order::where('status', OrderStatus::Paid)->whereBetween('paid_at', $range)->sum('tip');
+        $this->cashTips = (float) Order::where('status', OrderStatus::Paid)->whereBetween('paid_at', $range)->whereIn('payment_method', ['cash', 'mixed'])->sum('tip');
         $this->cashExpenses = (float) Expense::whereDate('spent_on', $day)->where('from_cash', true)->sum('total');
         $this->movementsNet = (float) CashMovement::whereBetween('moved_at', $range)->get()->sum(fn ($m) => $m->signed());
+    }
+
+    /** Lo llama el poll: si se vende en otro dispositivo, el esperado se mantiene al día. */
+    public function refreshTotals(): void
+    {
+        $this->loadTotals();
+        unset($this->movements);
     }
 
     #[Computed]
@@ -134,7 +145,7 @@ new #[Title('Corte de caja')] class extends Component
     {
         $this->validate([
             'moveType' => ['required', 'in:in,out'],
-            'moveAmount' => ['required', 'numeric', 'gt:0'],
+            'moveAmount' => ['required', 'numeric', 'gt:0', 'max:9999999'],
             'moveReason' => ['nullable', 'string', 'max:120'],
         ], attributes: ['moveAmount' => 'monto', 'moveReason' => 'motivo']);
 
@@ -182,10 +193,14 @@ new #[Title('Corte de caja')] class extends Component
     public function save(): void
     {
         $this->validate([
-            'opening' => ['required', 'numeric', 'min:0'],
-            'counted' => ['required', 'numeric', 'min:0'],
+            'opening' => ['required', 'numeric', 'min:0', 'max:9999999'],
+            'counted' => ['required', 'numeric', 'min:0', 'max:9999999'],
             'notes' => ['nullable', 'string', 'max:255'],
         ], attributes: ['opening' => 'fondo inicial', 'counted' => 'efectivo contado']);
+
+        // Los totales se cargaron al abrir la página: se recalculan para guardar el esperado de este momento.
+        $this->loadTotals();
+        unset($this->expected, $this->difference);
 
         $close = CashClose::whereDate('closed_on', $this->day())->first() ?? new CashClose(['closed_on' => $this->day()->toDateString()]);
 
@@ -204,7 +219,7 @@ new #[Title('Corte de caja')] class extends Component
 };
 ?>
 
-<div x-data="{
+<div wire:poll.60s.visible="refreshTotals" x-data="{
         get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales + $wire.movementsNet - $wire.cashExpenses) * 100) / 100 },
         moveOpen: false,
         get diff() {
@@ -217,14 +232,14 @@ new #[Title('Corte de caja')] class extends Component
             return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(n);
         },
      }">
-    <x-page-header title="Corte de caja">
+    <x-page-header title="Corte de caja" tour="corte">
         <x-date-nav :max="today()->toDateString()" />
     </x-page-header>
 
     <div class="mx-auto max-w-xl space-y-4">
         <section class="card !p-0">
             <dl class="divide-y divide-line">
-                <div class="flex items-center justify-between gap-4 px-4 py-3">
+                <div class="flex items-center justify-between gap-4 px-4 py-3" data-tour="corte-fondo">
                     <dt>
                         <label for="opening" class="font-semibold">Fondo inicial</label>
                         <p class="text-sm text-muted">Con lo que abriste la caja</p>
@@ -232,7 +247,7 @@ new #[Title('Corte de caja')] class extends Component
                     <dd class="w-36"><x-money-input id="opening" wire:model="opening" class="!min-h-11 text-right !text-lg" /></dd>
                 </div>
                 <div class="flex items-center justify-between px-4 py-3">
-                    <dt class="text-muted">Cobrado en efectivo @if ($tips > 0)<span class="block text-xs">incluye propinas</span>@endif</dt>
+                    <dt class="text-muted">Cobrado en efectivo @if ($cashTips > 0)<span class="block text-xs">incluye propinas</span>@endif</dt>
                     <dd class="num text-xl font-bold" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ $cashSales > 0 ? '+' : '' }}{{ money($cashSales) }}</dd>
                 </div>
                 <div class="flex items-center justify-between px-4 py-3">
@@ -245,7 +260,7 @@ new #[Title('Corte de caja')] class extends Component
                         <dd class="num text-xl font-bold">{{ $movementsNet > 0 ? '+' : '−' }}{{ money(abs($movementsNet)) }}</dd>
                     </div>
                 @endif
-                <div class="flex items-end justify-between bg-sunken/60 px-4 py-4">
+                <div class="flex items-end justify-between bg-sunken/60 px-4 py-4" data-tour="corte-esperado">
                     <dt class="font-semibold">Debe haber en caja</dt>
                     <dd class="num text-[2.5rem] leading-none font-bold" x-text="fmt(expected)" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ money($this->expected) }}</dd>
                 </div>
@@ -277,7 +292,7 @@ new #[Title('Corte de caja')] class extends Component
         @endif
 
         {{-- Movimientos de caja --}}
-        <section class="space-y-2">
+        <section class="space-y-2" data-tour="corte-movimientos">
             <div class="flex items-center justify-between px-1">
                 <h2 class="section-title">Movimientos de caja</h2>
                 <div class="flex gap-2">
@@ -332,7 +347,7 @@ new #[Title('Corte de caja')] class extends Component
         </div>
 
         <section class="card space-y-4 !p-5">
-            <div>
+            <div data-tour="corte-contado">
                 <label class="label" for="counted">Efectivo contado</label>
                 <x-money-input id="counted" wire:model="counted" placeholder="0" class="!min-h-14 !text-2xl" />
                 <p class="hint">Cuenta billetes y monedas al cerrar.</p>
@@ -354,7 +369,7 @@ new #[Title('Corte de caja')] class extends Component
                 <input id="notes" type="text" wire:model="notes" class="input" placeholder="Ej. se pagó el gas con efectivo de la caja">
             </div>
 
-            <button type="button" wire:click="save" class="btn-primary btn-lg w-full" wire:loading.attr="disabled" wire:target="save">
+            <button type="button" wire:click="save" data-tour="corte-guardar" class="btn-primary btn-lg w-full" wire:loading.attr="disabled" wire:target="save">
                 <span wire:loading.remove wire:target="save">{{ $this->saved ? 'Actualizar corte' : 'Guardar corte' }}</span>
                 <span wire:loading wire:target="save">Guardando...</span>
             </button>
@@ -364,7 +379,7 @@ new #[Title('Corte de caja')] class extends Component
         </section>
 
         @if ($this->history->isNotEmpty())
-            <section class="space-y-2 pt-2">
+            <section class="space-y-2 pt-2" data-tour="corte-historial">
                 <h2 class="section-title px-1">Cortes anteriores</h2>
                 <ul class="list">
                     @foreach ($this->history as $close)

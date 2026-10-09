@@ -39,6 +39,11 @@ class Product extends Model
         return $this->hasMany(ProductExtra::class)->orderBy('sort_order')->orderBy('id');
     }
 
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
+    }
+
     /**
      * Costo de una pieza con el costo actual de cada insumo.
      *

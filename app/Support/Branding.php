@@ -16,6 +16,9 @@ class Branding
 
     public const DEFAULT_SHORT_NAME = 'San Isidro';
 
+    /** 4000 × 4000: más que eso no cabe en memoria al procesarla. */
+    public const MAX_PIXELS = 16_000_000;
+
     /** Fondo del icono de iOS, que no admite transparencia. */
     protected const IOS_BACKGROUND = [244, 243, 240];
 
@@ -52,6 +55,13 @@ class Branding
     /** Recorta la imagen a un cuadrado centrado y genera los tamaños que usa la app. */
     public static function store(UploadedFile $file): void
     {
+        // Una imagen enorme (aunque pese poco) agota la memoria al descomprimirla.
+        [$width, $height] = @getimagesize($file->getRealPath()) ?: [0, 0];
+
+        if ($width * $height > self::MAX_PIXELS) {
+            throw new RuntimeException('La imagen es demasiado grande.');
+        }
+
         $binary = file_get_contents($file->getRealPath());
         $source = @imagecreatefromstring($binary);
 

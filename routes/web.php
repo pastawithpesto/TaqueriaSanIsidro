@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\BrandingController;
+use App\Support\Tours;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\Rule;
 
 Route::get('/brand/logo-{size}.png', [BrandingController::class, 'logo'])->whereNumber('size')->name('brand.logo');
 Route::get('/manifest.webmanifest', [BrandingController::class, 'manifest'])->name('manifest');
@@ -23,8 +25,11 @@ Route::middleware('auth')->group(function () {
     Route::livewire('/insumos', 'pages::insumos')->name('insumos');
     Route::livewire('/ajustes', 'pages::ajustes')->name('ajustes');
 
+    // Marca un recorrido como visto para no mostrarlo solo otra vez.
     Route::post('/tutorial/visto', function (Request $request) {
-        $request->user()->update(['onboarded_at' => now()]);
+        $tour = $request->validate(['tour' => ['required', Rule::in(Tours::KEYS)]])['tour'];
+        $user = $request->user();
+        $user->update(['seen_tours' => array_values(array_unique([...$user->seen_tours ?? [], $tour]))]);
 
         return response()->noContent();
     })->name('tutorial.done');

@@ -14,7 +14,7 @@ class OrderBuilder
 {
     /**
      * @param  array<int, array{product_id: int, qty: int, without?: array<int>, extras?: array<int>, notes?: ?string}>  $lines
-     * @return array{items: array<int, array<string, mixed>>, total: float, missing: array<int, string>}
+     * @return array{items: array<int, array<string, mixed>>, total: float, missing: array<int, string>, unavailable: array<int, string>}
      */
     public static function items(array $lines): array
     {
@@ -23,7 +23,6 @@ class OrderBuilder
             ->values();
 
         $products = Product::with(['ingredients', 'extras.ingredient', 'optionGroups.choices'])
-            ->where('active', true)
             ->whereIn('id', $lines->pluck('product_id')->map(fn ($id) => (int) $id))
             ->get()
             ->keyBy('id');
@@ -31,11 +30,15 @@ class OrderBuilder
         $items = [];
         $total = 0.0;
         $missing = [];
+        // Productos que se ocultaron o borraron mientras el pedido estaba en el carrito.
+        $unavailable = [];
 
         foreach ($lines as $line) {
             $product = $products->get((int) $line['product_id']);
 
-            if (! $product) {
+            if (! $product?->active) {
+                $unavailable[] = $product->name ?? 'un producto borrado';
+
                 continue;
             }
 
@@ -89,7 +92,31 @@ class OrderBuilder
             ];
         }
 
-        return ['items' => $items, 'total' => round($total, 2), 'missing' => array_values(array_unique($missing))];
+        return [
+            'items' => $items,
+            'total' => round($total, 2),
+            'missing' => array_values(array_unique($missing)),
+            'unavailable' => array_values(array_unique($unavailable)),
+        ];
+    }
+
+    /**
+     * Huella de las partidas (productos, cantidades e indicaciones, sin precios)
+     * para saber si un pedido cambió al editarlo.
+     *
+     * @param  iterable<int, mixed>  $items  partidas guardadas o renglones de items()
+     */
+    public static function signature(iterable $items): string
+    {
+        return collect($items)
+            ->map(fn ($item) => json_encode([
+                (int) data_get($item, 'product_id'),
+                (int) data_get($item, 'quantity'),
+                data_get($item, 'modifiers') ?: [],
+                (string) data_get($item, 'notes'),
+            ]))
+            ->sort()
+            ->join('|');
     }
 
     /** Reemplaza las partidas de la orden y actualiza su total (productos más empaque). */

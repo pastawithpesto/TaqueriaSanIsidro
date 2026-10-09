@@ -63,17 +63,24 @@ new #[Title('Ajustes')] class extends Component
     public function updatedLogo(): void
     {
         $this->validate([
-            'logo' => ['image', 'mimes:png,jpg,jpeg,webp', 'max:10240'],
+            'logo' => ['image', 'mimes:png,jpg,jpeg,webp', 'max:10240', 'dimensions:max_width=4000,max_height=4000'],
         ], attributes: ['logo' => 'logo']);
     }
 
     public function saveLogo(): void
     {
         $this->validate([
-            'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:10240'],
+            'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:10240', 'dimensions:max_width=4000,max_height=4000'],
         ], attributes: ['logo' => 'logo']);
 
-        Branding::store($this->logo);
+        try {
+            Branding::store($this->logo);
+        } catch (RuntimeException $e) {
+            $this->addError('logo', $e->getMessage());
+
+            return;
+        }
+
         $this->reset('logo');
         $this->dispatch('toast', message: 'Logo actualizado');
     }
@@ -99,17 +106,28 @@ new #[Title('Ajustes')] class extends Component
         ], attributes: ['current_password' => 'contraseña actual', 'new_password' => 'contraseña nueva']);
 
         Auth::user()->update(['password' => $this->new_password]);
+        // Cierra la sesión en los demás equipos (incluidos los que tenían "Mantener sesión").
+        Auth::logoutOtherDevices($this->new_password);
+
         $this->reset('current_password', 'new_password', 'new_password_confirmation');
-        $this->dispatch('toast', message: 'Contraseña actualizada');
+        $this->dispatch('toast', message: 'Contraseña actualizada. Se cerró la sesión en los demás equipos.');
+    }
+
+    /** Cada pantalla vuelve a mostrar su explicación la próxima vez que se abra. */
+    public function resetTours(): void
+    {
+        Auth::user()->update(['seen_tours' => []]);
+        $this->dispatch('tours-reset');
+        $this->dispatch('toast', message: 'Listo. Cada pantalla te volverá a explicar cómo funciona.');
     }
 };
 ?>
 
 <div>
-    <x-page-header title="Ajustes" />
+    <x-page-header title="Ajustes" tour="ajustes" />
     <div class="mx-auto max-w-xl space-y-5">
     {{-- Logo --}}
-    <section class="card space-y-4">
+    <section class="card space-y-4" data-tour="ajustes-logo">
         <div>
             <h2 class="section-title">Logo</h2>
             <p class="text-sm text-muted">Aparece en el login, el menú y el ícono de la app en el celular.</p>
@@ -137,7 +155,7 @@ new #[Title('Ajustes')] class extends Component
                         <input type="file" wire:model="logo" accept="image/png,image/jpeg,image/webp" class="sr-only">
                     </label>
                     <p wire:loading wire:target="logo" class="text-sm text-muted">Subiendo...</p>
-                    <p class="text-sm text-muted">PNG, JPG o WebP, hasta 10 MB. Mejor si es cuadrada.</p>
+                    <p class="text-sm text-muted">PNG, JPG o WebP, hasta 10 MB y 4000 píxeles por lado. Mejor si es cuadrada.</p>
                 @endif
                 @error('logo') <p class="error">{{ $message }}</p> @enderror
             </div>
@@ -149,7 +167,7 @@ new #[Title('Ajustes')] class extends Component
     </section>
 
     {{-- Nombre --}}
-    <form wire:submit="saveBusiness" class="card space-y-4">
+    <form wire:submit="saveBusiness" class="card space-y-4" data-tour="ajustes-negocio">
         <h2 class="section-title">Negocio</h2>
         <div>
             <label class="label" for="name">Nombre</label>
@@ -166,7 +184,7 @@ new #[Title('Ajustes')] class extends Component
     </form>
 
     {{-- Para llevar --}}
-    <form wire:submit="savePackaging" class="card space-y-4">
+    <form wire:submit="savePackaging" class="card space-y-4" data-tour="ajustes-cobros">
         <div>
             <h2 class="section-title">Para llevar y a domicilio</h2>
             <p class="text-sm text-muted">El empaque se suma una vez a cada pedido para llevar o a domicilio. El envío es el costo normal; se puede cambiar en cada pedido. Deja 0 si no cobras.</p>
@@ -187,7 +205,7 @@ new #[Title('Ajustes')] class extends Component
     </form>
 
     {{-- Contraseña --}}
-    <form wire:submit="savePassword" class="card space-y-4">
+    <form wire:submit="savePassword" class="card space-y-4" data-tour="ajustes-contrasena">
         <h2 class="section-title">Contraseña</h2>
         <p class="-mt-2 text-sm text-muted">Sesión iniciada como {{ auth()->user()->email }}.</p>
         <input type="text" autocomplete="username" value="{{ auth()->user()->email }}" class="sr-only" tabindex="-1" aria-hidden="true" readonly>
@@ -210,14 +228,19 @@ new #[Title('Ajustes')] class extends Component
         <button class="btn-primary" wire:loading.attr="disabled">Cambiar contraseña</button>
     </form>
 
-    {{-- Tutorial --}}
-    <section class="card flex items-center gap-4">
-        <span class="grid size-12 shrink-0 place-items-center rounded-2xl bg-limon text-on-limon"><x-icon name="info" class="size-6" /></span>
-        <div class="min-w-0 flex-1">
-            <h2 class="section-title">Tutorial</h2>
-            <p class="text-sm text-muted">Repasa cómo vender, cobrar y llevar tus gastos.</p>
+    {{-- Explicaciones de cada pantalla (resources/js/tours.js) --}}
+    <section class="card space-y-4" data-tour="ajustes-recorridos">
+        <div class="flex items-start gap-4">
+            <span class="grid size-12 shrink-0 place-items-center rounded-2xl bg-limon text-on-limon"><x-icon name="help" class="size-6" /></span>
+            <div class="min-w-0 flex-1">
+                <h2 class="section-title">Explicaciones</h2>
+                <p class="text-sm text-muted">Cada pantalla tiene un botón ? junto a su título que explica cómo usarla. La primera vez que entras a cada una, la explicación sale sola.</p>
+            </div>
         </div>
-        <button type="button" class="btn" @click="$dispatch('open-tutorial')">Ver tutorial</button>
+        <div class="flex flex-wrap gap-2">
+            <a href="{{ route('vender', ['recorrido' => 'vender']) }}" wire:navigate class="btn">Ver el recorrido de Vender</a>
+            <button type="button" wire:click="resetTours" class="btn-quiet">Volver a mostrar todas</button>
+        </div>
     </section>
 
     {{-- Instalación --}}

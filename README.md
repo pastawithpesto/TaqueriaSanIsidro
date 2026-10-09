@@ -19,15 +19,40 @@ La primera vez crea `.env`, instala dependencias, genera la llave y corre las mi
 
 - App: http://localhost:8090
 - Vite (HMR): puerto 5174
-- PostgreSQL: puerto 5433 (usuario `taqueria`, password `secret`, base `taqueria`)
+- PostgreSQL: puerto 5433, solo desde este equipo (usuario `taqueria`, password `secret`, base `taqueria`)
 
-En local el seeder crea el usuario `admin@taqueria.test` con contraseña `password`. En producción:
-
-```sh
-docker compose exec app php artisan app:create-user
-```
+En local el seeder crea el usuario `admin@taqueria.test` con contraseña `password`.
 
 Los puertos se cambian en `.env` (`APP_PORT`, `VITE_PORT`, `FORWARD_DB_PORT`).
+
+Los tests corren contra Postgres, en la base `taqueria_test`. Se crea sola con un volumen nuevo; si el volumen ya existía:
+
+```sh
+docker compose exec db createdb -U taqueria taqueria_test
+```
+
+## Producción
+
+`compose.prod.yaml` arma una imagen con el código, las dependencias sin las de desarrollo y los assets ya compilados. No publica el puerto de Postgres. Al arrancar corre las migraciones y `php artisan optimize`.
+
+Variables (en un `.env` junto al compose o en las variables del stack de Portainer):
+
+- `APP_KEY`: obligatoria. Se genera con `echo "base64:$(openssl rand -base64 32)"` y no se cambia después.
+- `APP_URL`: obligatoria, la URL pública con https.
+- `DB_PASSWORD`: obligatoria.
+- `APP_PORT`: puerto del host para nginx (8090 por omisión).
+- `TRUSTED_PROXIES`: `*` solo si hay un proxy o túnel HTTPS delante. Si nginx queda expuesto directo, vacío.
+
+```sh
+docker compose -f compose.prod.yaml up -d --build
+docker compose -f compose.prod.yaml exec app php artisan app:create-user
+```
+
+El logo subido vive en el volumen `storage` y la base en `db-data`. Respaldo de la base:
+
+```sh
+docker compose -f compose.prod.yaml exec -T db pg_dump -U taqueria taqueria > respaldo-$(date +%F).sql
+```
 
 ## Comandos útiles
 
@@ -41,23 +66,24 @@ docker compose logs -f app
 ## Módulos
 
 - Vender: botones por producto, indicaciones por pieza ("sin cebolla" sale de la receta y descuenta su costo; extras con precio), nota libre y nombre del pedido. Se cobra de una vez o se guarda sin cobrar.
-- Pedidos: cola de lo que falta entregar y de lo que falta cobrar, con tiempo de espera y hora de recogida. Pantalla de cocina para una tablet.
+- Pedidos: cola de lo que falta entregar y de lo que falta cobrar, con tiempo de espera y hora de recogida. Los guardados sin cobrar de días anteriores van aparte. Pantalla de cocina para una tablet, solo con lo de hoy; si un pedido listo se edita, vuelve a la cocina.
 - Combos con opciones para elegir (refresco), para llevar, aquí o a domicilio (dirección, teléfono, envío, accesos a llamar, WhatsApp y mapa), productos agotados por día.
 - Propinas aparte de las ventas, descuentos, cortesías y pago mixto.
-- Ventas: historial por día, con cancelación.
+- Ventas: historial por día, con cancelación. Una orden cuenta el día en que se cobró, igual que en el corte y en Resumen.
 - Gastos: compras de insumos, gas, desechables, etc. Una compra de insumo con cantidad actualiza el costo por unidad.
-- Productos: precio, categoría, receta (marcando lo que se puede pedir sin) y extras. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte.
-- Insumos: catálogo con unidad y costo.
+- Productos: precio, categoría, receta (marcando lo que se puede pedir sin) y extras. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte. Se acomodan arrastrando, en el mismo orden que salen en Vender. Un producto con ventas no se borra, se oculta.
+- Insumos: catálogo con unidad y costo. Si un insumo en uso pasa de kg a g (o de lt a ml), recetas y compras se convierten solas.
 - Resumen: ventas, gastos, ganancia por receta y ventas menos gastos, por periodo, con comparativo y horas fuertes.
 - Corte de caja: efectivo esperado contra contado, con entradas y retiros de efectivo.
 - Lista de compras: sugerencia por insumo según lo usado los mismos días de semanas anteriores.
 - Ajustes: nombre y logo del negocio (se usan en el login, el menú y el ícono de la app instalable), y cambio de contraseña.
+- Explicaciones: cada pantalla tiene un recorrido guiado (driver.js) que resalta sus partes. Sale solo la primera vez y se repite con el botón ? del encabezado. Los pasos y textos están en `resources/js/tours.js`.
 
 Cada venta guarda el costo de receta del momento, así el historial no cambia si luego sube la carne.
 
 ## Notas
 
-- Agregar y quitar productos en Vender ocurre en el navegador; el servidor solo interviene al cobrar y recalcula todo con los precios de la base.
+- Agregar y quitar productos en Vender ocurre en el navegador; el servidor solo interviene al cobrar y recalcula todo con los precios de la base. El pedido en curso se guarda en el navegador (`localStorage`), así sobrevive a una recarga o a una sesión vencida.
 - El logo por defecto está en `public/images/brand/`. El que se sube desde Ajustes se guarda en `storage/app/private/branding/`.
 - Detrás de un túnel o proxy HTTPS: `TRUSTED_PROXIES=*` y `APP_URL` con la URL pública.
 

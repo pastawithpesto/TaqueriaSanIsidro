@@ -38,7 +38,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-dvh antialiased">
+<body class="min-h-dvh antialiased" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}">
     <div id="busy" aria-hidden="true"></div>
 
     <div class="md:grid md:min-h-dvh md:grid-cols-[15.5rem_1fr]">
@@ -51,12 +51,14 @@
                 </a>
                 <nav class="flex flex-col gap-0.5" aria-label="Principal">
                     @foreach ($main as [$route, $label, $icon])
-                        <x-nav-link :route="$route" :icon="$icon" :count="$route === 'pedidos' ? $pendingCount : 0">{{ $label }}</x-nav-link>
+                        <x-nav-link :route="$route" :icon="$icon" :count="$route === 'pedidos' ? $pendingCount : 0" data-tour="nav-{{ $route }}">{{ $label }}</x-nav-link>
                     @endforeach
-                    <p class="mt-5 mb-1.5 px-3 text-xs font-semibold text-muted">Administración</p>
-                    @foreach ($more as [$route, $label, $icon])
-                        <x-nav-link :route="$route" :icon="$icon">{{ $label }}</x-nav-link>
-                    @endforeach
+                    <div class="flex flex-col gap-0.5" data-tour="nav-admin">
+                        <p class="mt-5 mb-1.5 px-3 text-xs font-semibold text-muted">Administración</p>
+                        @foreach ($more as [$route, $label, $icon])
+                            <x-nav-link :route="$route" :icon="$icon">{{ $label }}</x-nav-link>
+                        @endforeach
+                    </div>
                 </nav>
                 <div class="mt-auto border-t border-line pt-3">
                     <p class="truncate px-3 pb-1 text-sm text-muted">{{ auth()->user()->name }}</p>
@@ -80,7 +82,7 @@
         <nav class="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md" aria-label="Principal">
             @foreach ($main as [$route, $label, $icon])
                 @php $active = request()->routeIs($route); @endphp
-                <a href="{{ route($route) }}" wire:navigate
+                <a href="{{ route($route) }}" wire:navigate data-tour="nav-{{ $route }}"
                    class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $active ? 'text-ink' : 'text-muted' }}"
                    @if ($active) aria-current="page" @endif>
                     <span class="relative flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-chile text-white' : '' }}">
@@ -92,7 +94,7 @@
                     {{ $label }}
                 </a>
             @endforeach
-            <button type="button" @click="more = true"
+            <button type="button" @click="more = true" data-tour="nav-mas"
                     class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $moreActive ? 'text-ink' : 'text-muted' }}">
                 <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $moreActive ? 'bg-chile text-white' : '' }}">
                     <x-icon name="more" class="size-[22px]" />
@@ -175,8 +177,6 @@
             </div>
         </div>
     </div>
-
-    <x-onboarding />
 
     @livewireScripts
     <script>

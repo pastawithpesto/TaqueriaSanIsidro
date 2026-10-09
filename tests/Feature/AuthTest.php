@@ -52,4 +52,21 @@ class AuthTest extends TestCase
             $this->get($path)->assertOk();
         }
     }
+
+    public function test_login_is_blocked_for_five_minutes_after_five_failed_attempts(): void
+    {
+        User::factory()->create(['email' => 'a@b.test', 'password' => 'secret123']);
+
+        foreach (range(1, 5) as $attempt) {
+            Livewire::test('pages::login')->set('email', 'a@b.test')->set('password', 'nope')->call('login');
+        }
+
+        Livewire::test('pages::login')
+            ->set('email', 'a@b.test')
+            ->set('password', 'secret123')
+            ->call('login')
+            ->assertHasErrors(['email' => 'Demasiados intentos. Intenta de nuevo en 5 min.']);
+
+        $this->assertGuest();
+    }
 }

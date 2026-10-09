@@ -23,21 +23,31 @@ new #[Layout('layouts::guest')] #[Title('Entrar')] class extends Component
             'password' => ['required'],
         ]);
 
-        $key = Str::lower($this->email).'|'.request()->ip();
+        // [intentos, segundos de espera]: por correo y equipo, y por equipo con cualquier correo.
+        $limits = [
+            'login|'.Str::lower($this->email).'|'.request()->ip() => [5, 300],
+            'login|'.request()->ip() => [20, 3600],
+        ];
 
-        if (RateLimiter::tooManyAttempts($key, 5)) {
-            throw ValidationException::withMessages([
-                'email' => __('auth.throttle', ['seconds' => RateLimiter::availableIn($key)]),
-            ]);
+        foreach ($limits as $key => [$attempts]) {
+            if (RateLimiter::tooManyAttempts($key, $attempts)) {
+                throw ValidationException::withMessages([
+                    'email' => __('auth.throttle', ['minutes' => (int) ceil(RateLimiter::availableIn($key) / 60)]),
+                ]);
+            }
         }
 
         if (! Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
-            RateLimiter::hit($key);
+            foreach ($limits as $key => [, $decay]) {
+                RateLimiter::hit($key, $decay);
+            }
 
             throw ValidationException::withMessages(['email' => __('auth.failed')]);
         }
 
-        RateLimiter::clear($key);
+        foreach (array_keys($limits) as $key) {
+            RateLimiter::clear($key);
+        }
         session()->regenerate();
 
         $this->redirectIntended(route('vender'));
