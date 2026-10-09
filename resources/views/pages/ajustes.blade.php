@@ -88,11 +88,13 @@ new #[Title('Ajustes')] class extends Component
 };
 ?>
 
-<div class="mx-auto max-w-xl space-y-5">
+<div>
+    <x-page-header title="Ajustes" />
+    <div class="mx-auto max-w-xl space-y-5">
     {{-- Logo --}}
     <section class="card space-y-4">
         <div>
-            <h2 class="font-display text-2xl font-bold">Logo</h2>
+            <h2 class="section-title">Logo</h2>
             <p class="text-sm text-muted">Aparece en el login, el menú y el ícono de la app en el celular.</p>
         </div>
 
@@ -131,7 +133,7 @@ new #[Title('Ajustes')] class extends Component
 
     {{-- Nombre --}}
     <form wire:submit="saveBusiness" class="card space-y-4">
-        <h2 class="font-display text-2xl font-bold">Negocio</h2>
+        <h2 class="section-title">Negocio</h2>
         <div>
             <label class="label" for="name">Nombre</label>
             <input id="name" type="text" wire:model="name" class="input" maxlength="60">
@@ -148,7 +150,7 @@ new #[Title('Ajustes')] class extends Component
 
     {{-- Contraseña --}}
     <form wire:submit="savePassword" class="card space-y-4">
-        <h2 class="font-display text-2xl font-bold">Contraseña</h2>
+        <h2 class="section-title">Contraseña</h2>
         <p class="-mt-2 text-sm text-muted">Sesión iniciada como {{ auth()->user()->email }}.</p>
         <input type="text" autocomplete="username" value="{{ auth()->user()->email }}" class="sr-only" tabindex="-1" aria-hidden="true" readonly>
         <div>
@@ -172,7 +174,8 @@ new #[Title('Ajustes')] class extends Component
 
     {{-- Instalación --}}
     <section class="card space-y-1">
-        <h2 class="font-display text-2xl font-bold">Instalar en el celular</h2>
+        <h2 class="section-title">Instalar en el celular</h2>
         <p class="text-sm text-muted">En Android con Chrome: menú, "Instalar app". En iPhone con Safari: Compartir, "Agregar a pantalla de inicio". La app se abre sin barra del navegador y con el logo del negocio.</p>
     </section>
+</div>
 </div>

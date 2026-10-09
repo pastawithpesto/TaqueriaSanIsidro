@@ -4,9 +4,9 @@
 @source '../../storage/framework/views/*.php';
 
 /*
- * Identidad: lona de taquería. Rojo chile para la acción, limón para el
- * precio y lo seleccionado, tinta oscura para el texto. Los verdes y ámbar
- * solo comunican estado (ganancia, faltante).
+ * Identidad: lona de taquería. Rojo chile para la acción principal, limón
+ * para el precio, tinta para el texto. Verde y ámbar solo comunican estado.
+ * Radios: hojas 24px, tarjetas 16px, controles 12px, chips redondos.
  */
 @theme {
     --font-sans: 'Barlow', ui-sans-serif, system-ui, sans-serif;
@@ -59,6 +59,7 @@
 
 html {
     -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
 }
 
 body {
@@ -72,11 +73,24 @@ body {
         outline: 2px solid var(--color-chile);
         outline-offset: 2px;
     }
+
+    /* Quita las flechas de los campos numéricos: se capturan con el teclado del celular. */
+    input[type='number']::-webkit-inner-spin-button,
+    input[type='number']::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    input[type='number'] {
+        -moz-appearance: textfield;
+    }
 }
 
-/* Barra de progreso de wire:navigate */
 #nprogress .bar {
     background: var(--color-chile) !important;
+}
+
+[x-cloak] {
+    display: none !important;
 }
 
 @utility num {
@@ -85,54 +99,90 @@ body {
     letter-spacing: -0.005em;
 }
 
+@utility scroll-fade {
+    mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+}
+
 @layer components {
+    .page-title {
+        @apply font-display text-[1.75rem] leading-none font-bold md:text-[2.5rem];
+    }
+    .section-title {
+        @apply font-display text-[1.375rem] leading-tight font-bold;
+    }
     .card {
         @apply rounded-2xl border border-line bg-surface p-4;
+    }
+    .list {
+        @apply divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface;
     }
     .label {
         @apply mb-1.5 block text-sm font-semibold text-ink;
     }
     .hint {
-        @apply mt-1 text-sm text-muted;
+        @apply mt-1.5 text-sm text-muted;
     }
     .input {
-        @apply block min-h-12 w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-base text-ink placeholder:text-muted/70 focus:border-chile focus:outline-none focus:ring-2 focus:ring-chile/25;
+        @apply block min-h-12 w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-base text-ink placeholder:text-muted/70 focus:border-chile focus:ring-2 focus:ring-chile/25 focus:outline-none;
     }
     .error {
-        @apply mt-1 text-sm font-medium text-chile;
+        @apply mt-1.5 text-sm font-medium text-chile;
     }
     .btn {
-        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink hover:bg-sunken disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.98];
+        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold whitespace-nowrap text-ink select-none hover:bg-sunken disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.97];
     }
     .btn-primary {
-        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-chile bg-chile px-4 text-sm font-semibold text-white hover:bg-chile-strong disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.98];
+        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-chile bg-chile px-4 text-sm font-semibold whitespace-nowrap text-white select-none hover:bg-chile-strong disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.97];
     }
     .btn-lg {
-        @apply min-h-14 px-6 text-base;
+        @apply min-h-14 rounded-2xl px-6 text-base;
+    }
+    .btn-icon {
+        @apply inline-flex size-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-ink hover:bg-sunken disabled:pointer-events-none disabled:opacity-35 motion-safe:transition motion-safe:active:scale-[0.94];
     }
     .btn-quiet {
-        @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-muted hover:bg-sunken hover:text-ink;
+        @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold whitespace-nowrap text-muted hover:bg-sunken hover:text-ink;
     }
     .btn-quiet-danger {
-        @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-chile hover:bg-chile-soft;
+        @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold whitespace-nowrap text-chile hover:bg-chile-soft;
     }
     .chip {
-        @apply inline-flex min-h-9 items-center rounded-full border border-line bg-surface px-3.5 text-sm font-semibold text-ink motion-safe:transition;
+        @apply inline-flex min-h-9 shrink-0 items-center rounded-full border border-line bg-surface px-3.5 text-sm font-semibold whitespace-nowrap text-ink select-none motion-safe:transition;
     }
     .chip[aria-pressed='true'] {
         @apply border-ink bg-ink text-bg;
     }
     .badge {
-        @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold;
+        @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold whitespace-nowrap;
+    }
+
+    /* Control segmentado */
+    .segmented {
+        @apply grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-sunken p-1;
+    }
+    .segmented > button {
+        @apply min-h-10 rounded-lg px-2 text-sm font-semibold whitespace-nowrap text-muted select-none motion-safe:transition;
+    }
+    .segmented > button[aria-pressed='true'] {
+        @apply bg-surface text-ink shadow-sm;
+    }
+
+    /* Menú contextual */
+    .menu {
+        @apply absolute top-10 right-0 z-20 w-52 rounded-xl border border-line bg-surface p-1 shadow-xl;
+    }
+    .menu > button,
+    .menu > a {
+        @apply flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-[15px] font-semibold hover:bg-sunken;
     }
 
     /* Interruptor */
     .switch {
-        @apply relative h-7 w-12 shrink-0 cursor-pointer appearance-none rounded-full bg-sunken ring-1 ring-inset ring-line motion-safe:transition;
+        @apply relative h-7 w-12 shrink-0 cursor-pointer appearance-none rounded-full bg-sunken ring-1 ring-line ring-inset motion-safe:transition;
     }
     .switch::after {
         content: '';
-        @apply absolute left-0.5 top-0.5 size-6 rounded-full bg-surface shadow-sm ring-1 ring-line motion-safe:transition-transform;
+        @apply absolute top-0.5 left-0.5 size-6 rounded-full bg-surface shadow-sm ring-1 ring-line motion-safe:transition-transform;
     }
     .switch:checked {
         @apply bg-salsa ring-salsa;
@@ -142,13 +192,13 @@ body {
     }
 
     .sheet-in {
-        @apply motion-safe:animate-[sheet-in_220ms_cubic-bezier(0.2,0.8,0.2,1)];
+        @apply motion-safe:animate-[sheet-in_240ms_cubic-bezier(0.2,0.8,0.2,1)];
     }
 }
 
 @keyframes sheet-in {
     from {
-        transform: translateY(24px);
+        transform: translateY(28px);
         opacity: 0;
     }
     to {
@@ -157,16 +207,42 @@ body {
     }
 }
 
-@keyframes bump {
-    40% {
-        transform: scale(1.18);
+/* Barra de actividad del servidor */
+#busy {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: 3px;
+    z-index: 70;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms;
+}
+#busy.is-busy {
+    opacity: 1;
+}
+#busy::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    background: var(--color-chile);
+    border-radius: 0 3px 3px 0;
+}
+#busy.is-busy::before {
+    animation: busy 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes busy {
+    from {
+        transform: translateX(-100%);
+    }
+    to {
+        transform: translateX(260%);
     }
 }
-
-.bump {
-    @apply motion-safe:animate-[bump_180ms_ease-out];
-}
-
-[x-cloak] {
-    display: none !important;
+@media (prefers-reduced-motion: reduce) {
+    #busy::before {
+        animation: none;
+        width: 100%;
+    }
 }

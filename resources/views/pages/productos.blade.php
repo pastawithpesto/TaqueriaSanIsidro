@@ -2,7 +2,6 @@
 
 use App\Models\Ingredient;
 use App\Models\Product;
-use Illuminate\Support\Number;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -169,50 +168,68 @@ new #[Title('Productos')] class extends Component
 };
 ?>
 
-<div class="space-y-5">
-    <div class="flex items-center justify-between gap-3">
-        <p class="text-sm text-muted">{{ $this->products->where('active', true)->count() }} activos en la pantalla de venta</p>
-        <button type="button" wire:click="create" class="btn-primary"><x-icon name="plus" class="size-4" /> Nuevo producto</button>
-    </div>
+<div>
+    <x-page-header title="Productos">
+        <x-slot:actions>
+            <button type="button" wire:click="create" class="btn-primary"><x-icon name="plus" class="size-4" /> Producto</button>
+        </x-slot:actions>
+    </x-page-header>
 
+    <div class="space-y-5">
     @if ($this->products->isEmpty())
         <x-empty icon="tag" title="Aún no hay productos">
-            Agrega lo que vendes con su precio. Si también das de alta tus insumos, puedes armar la receta y ver cuánto ganas por pieza.
+            Agrega lo que vendes con su precio. Si das de alta tus insumos, puedes armar la receta y ver cuánto ganas por pieza.
             <x-slot:action><button type="button" wire:click="create" class="btn-primary">Agregar el primer producto</button></x-slot:action>
         </x-empty>
     @else
         @if ($this->ingredients->isEmpty())
             <div class="flex items-start gap-3 rounded-2xl bg-limon-soft p-4 text-sm">
-                <x-icon name="alert" class="mt-0.5 size-5 shrink-0" />
+                <x-icon name="info" class="mt-0.5 size-5 shrink-0" />
                 <p>Para calcular la ganancia necesitas insumos. <a href="{{ route('insumos') }}" wire:navigate class="font-semibold underline">Agrégalos aquí</a> y luego arma la receta de cada producto.</p>
             </div>
         @endif
 
         @foreach ($this->products->groupBy(fn ($p) => $p->category ?: 'Sin categoría') as $cat => $group)
             <section class="space-y-2" wire:key="cat-{{ $cat }}">
-                <h2 class="px-1 font-display text-xl font-bold">{{ $cat }}</h2>
-                <ul class="card divide-y divide-line !p-0">
+                <h2 class="section-title px-1">{{ $cat }}</h2>
+                <ul class="list">
                     @foreach ($group as $p)
                         @php
                             $cost = $p->unitCost();
-                            $margin = (float) $p->price > 0 ? ((float) $p->price - $cost) / (float) $p->price * 100 : 0;
+                            $price = (float) $p->price;
+                            $margin = $price > 0 ? ($price - $cost) / $price * 100 : 0;
+                            $hasRecipe = $p->ingredients->isNotEmpty();
                         @endphp
-                        <li wire:key="prod-{{ $p->id }}" @class(['flex items-center gap-3 px-4 py-3', 'opacity-55' => ! $p->active])>
-                            <div class="min-w-0 flex-1">
-                                <p class="truncate font-semibold">{{ $p->name }} @unless ($p->active) <span class="badge bg-sunken text-muted">Oculto</span> @endunless</p>
-                                @if ($p->ingredients->isEmpty())
-                                    <p class="text-sm"><span class="badge bg-limon-soft text-ink">Sin receta</span> <span class="text-muted">no se calcula la ganancia</span></p>
-                                @else
-                                    <p class="text-sm text-muted">Costo {{ Number::currency($cost) }}, ganas <span class="font-semibold text-salsa">{{ Number::currency((float) $p->price - $cost) }}</span> ({{ round($margin) }}%)</p>
-                                @endif
-                            </div>
-                            <span class="num inline-flex items-center rounded-lg bg-limon px-2.5 py-0.5 text-xl font-bold text-on-limon">{{ Number::currency((float) $p->price) }}</span>
+                        <li wire:key="prod-{{ $p->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
+                            <button type="button" wire:click="edit({{ $p->id }})" class="min-w-0 flex-1 text-left">
+                                <span @class(['block truncate font-semibold', 'text-muted' => ! $p->active])>{{ $p->name }}</span>
+                                <span class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+                                    @unless ($p->active)
+                                        <span class="badge bg-sunken text-muted"><x-icon name="eye-off" class="size-3.5" /> Oculto</span>
+                                    @endunless
+                                    @if ($hasRecipe)
+                                        <span>Costo {{ money($cost) }}</span>
+                                        <span>Ganas <span class="font-semibold text-ink">{{ money($price - $cost) }}</span></span>
+                                        <span @class([
+                                            'badge',
+                                            'bg-salsa-soft text-salsa' => $margin >= 50,
+                                            'bg-limon-soft text-ink' => $margin >= 25 && $margin < 50,
+                                            'bg-chile-soft text-chile' => $margin < 25,
+                                        ])>{{ round($margin) }}%</span>
+                                    @else
+                                        <span class="badge bg-limon-soft text-ink">Sin receta</span>
+                                    @endif
+                                </span>
+                            </button>
+                            <span class="num text-[1.375rem] font-bold">{{ money($price) }}</span>
                             <div x-data="{ menu: false }" class="relative">
-                                <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-9 justify-center !px-0" aria-label="Opciones de {{ $p->name }}"><x-icon name="more" /></button>
-                                <div x-show="menu" x-cloak class="absolute right-0 top-10 z-20 w-48 rounded-xl border border-line bg-surface p-1 shadow-xl" @click="menu = false">
-                                    <button type="button" wire:click="edit({{ $p->id }})" class="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold hover:bg-sunken"><x-icon name="pencil" class="size-4" /> Editar</button>
-                                    <button type="button" wire:click="duplicate({{ $p->id }})" class="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold hover:bg-sunken"><x-icon name="copy" class="size-4" /> Duplicar</button>
-                                    <button type="button" wire:click="toggle({{ $p->id }})" class="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold hover:bg-sunken"><x-icon name="check" class="size-4" /> {{ $p->active ? 'Ocultar en ventas' : 'Mostrar en ventas' }}</button>
+                                <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $p->name }}"><x-icon name="more" /></button>
+                                <div x-show="menu" x-cloak x-transition.origin.top.right class="menu" @click="menu = false">
+                                    <button type="button" wire:click="edit({{ $p->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
+                                    <button type="button" wire:click="duplicate({{ $p->id }})"><x-icon name="copy" class="size-4 text-muted" /> Duplicar</button>
+                                    <button type="button" wire:click="toggle({{ $p->id }})">
+                                        <x-icon :name="$p->active ? 'eye-off' : 'eye'" class="size-4 text-muted" /> {{ $p->active ? 'Ocultar en Vender' : 'Mostrar en Vender' }}
+                                    </button>
                                 </div>
                             </div>
                         </li>
@@ -221,6 +238,7 @@ new #[Title('Productos')] class extends Component
             </section>
         @endforeach
     @endif
+    </div>
 
     @if ($showForm)
         <x-sheet :title="$editingId ? 'Editar producto' : 'Nuevo producto'">
@@ -233,7 +251,7 @@ new #[Title('Productos')] class extends Component
                     </div>
                     <div>
                         <label class="label" for="price">Precio</label>
-                        <input id="price" type="number" inputmode="decimal" step="0.01" min="0" wire:model.live.debounce.300ms="price" class="input" placeholder="0.00">
+                        <x-money-input id="price" wire:model.live.debounce.300ms="price" placeholder="0" />
                         @error('price') <p class="error">{{ $message }}</p> @enderror
                     </div>
                     <div>
@@ -247,8 +265,8 @@ new #[Title('Productos')] class extends Component
 
                 <section class="space-y-3 rounded-2xl bg-sunken/60 p-4">
                     <div>
-                        <h3 class="font-display text-xl font-bold">Receta</h3>
-                        <p class="text-sm text-muted">Lo que lleva una pieza. Sirve para calcular el costo y la ganancia.</p>
+                        <h3 class="section-title">Receta</h3>
+                        <p class="text-sm text-muted">Lo que lleva una pieza. Con esto se calcula el costo y la ganancia.</p>
                     </div>
 
                     @forelse ($recipe as $index => $row)
@@ -296,16 +314,16 @@ new #[Title('Productos')] class extends Component
                             $profit = $priceNum - $this->formCost;
                         @endphp
                         <dl class="grid grid-cols-3 gap-2 border-t border-line pt-3 text-center">
-                            <div><dt class="text-xs text-muted">Costo</dt><dd class="num text-2xl font-bold">{{ Number::currency($this->formCost) }}</dd></div>
-                            <div><dt class="text-xs text-muted">Ganas</dt><dd @class(['num text-2xl font-bold', 'text-salsa' => $profit > 0, 'text-chile' => $profit < 0])>{{ $priceNum > 0 ? Number::currency($profit) : '-' }}</dd></div>
+                            <div><dt class="text-xs text-muted">Costo</dt><dd class="num text-2xl font-bold">{{ money($this->formCost) }}</dd></div>
+                            <div><dt class="text-xs text-muted">Ganas</dt><dd @class(['num text-2xl font-bold', 'text-salsa' => $profit > 0, 'text-chile' => $profit < 0])>{{ $priceNum > 0 ? money($profit) : '-' }}</dd></div>
                             <div><dt class="text-xs text-muted">Margen</dt><dd class="num text-2xl font-bold">{{ $priceNum > 0 ? round($profit / $priceNum * 100).'%' : '-' }}</dd></div>
                         </dl>
                     @endif
                 </section>
 
-                <label class="flex items-center justify-between gap-4 rounded-xl bg-sunken px-4 py-3">
+                <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
                     <span>
-                        <span class="block text-sm font-semibold">Mostrar en la pantalla de venta</span>
+                        <span class="block font-semibold">Mostrar en Vender</span>
                         <span class="block text-sm text-muted">Apágalo para ocultarlo sin borrarlo.</span>
                     </span>
                     <input type="checkbox" wire:model="active" class="switch">

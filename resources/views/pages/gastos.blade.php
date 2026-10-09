@@ -4,7 +4,6 @@ use App\Enums\ExpenseCategory;
 use App\Models\Expense;
 use App\Models\Ingredient;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Number;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -90,7 +89,7 @@ new #[Title('Gastos')] class extends Component
             return null;
         }
 
-        return Number::currency((float) $this->total / (float) $this->quantity).' por '.$ingredient->unit;
+        return money((float) $this->total / (float) $this->quantity).' por '.$ingredient->unit;
     }
 
     public function create(): void
@@ -157,126 +156,140 @@ new #[Title('Gastos')] class extends Component
 };
 ?>
 
-<div class="space-y-5">
-    <div class="flex items-center gap-2">
-        <button type="button" wire:click="shiftMonth(-1)" class="btn size-11 !px-0" aria-label="Mes anterior"><x-icon name="left" /></button>
-        <p class="flex-1 text-center font-display text-2xl font-bold">{{ $this->monthLabel }}</p>
-        <button type="button" wire:click="shiftMonth(1)" class="btn size-11 !px-0" aria-label="Mes siguiente"><x-icon name="right" /></button>
-    </div>
+@php
+    $total = (float) $this->expenses->sum('total');
+    $byCategory = $this->expenses->groupBy(fn ($e) => $e->category->value)
+        ->map(fn ($g, $key) => ['category' => \App\Enums\ExpenseCategory::from($key), 'total' => (float) $g->sum('total')])
+        ->sortByDesc('total');
+@endphp
 
-    @php
-        $total = (float) $this->expenses->sum('total');
-        $byCategory = $this->expenses->groupBy(fn ($e) => $e->category->value)
-            ->map(fn ($g, $key) => ['label' => ExpenseCategory::from($key)->label(), 'total' => (float) $g->sum('total')])
-            ->sortByDesc('total');
-    @endphp
-
-    <div class="card space-y-3">
-        <div class="flex items-end justify-between gap-3">
-            <div>
-                <p class="text-sm font-medium text-muted">Gastado en el mes</p>
-                <p class="num text-5xl font-bold leading-none">{{ Number::currency($total) }}</p>
-            </div>
-            <button type="button" wire:click="create" class="btn-primary"><x-icon name="plus" class="size-4" /> Nuevo gasto</button>
+<div>
+    <x-page-header title="Gastos">
+        <x-slot:actions>
+            <button type="button" wire:click="create" class="btn-primary"><x-icon name="plus" class="size-4" /> Gasto</button>
+        </x-slot:actions>
+        <div class="flex items-center gap-2">
+            <button type="button" wire:click="shiftMonth(-1)" class="btn-icon" aria-label="Mes anterior"><x-icon name="left" /></button>
+            <p class="flex min-h-11 flex-1 items-center justify-center rounded-xl border border-line bg-surface font-semibold">{{ $this->monthLabel }}</p>
+            <button type="button" wire:click="shiftMonth(1)" class="btn-icon" aria-label="Mes siguiente" @disabled($month >= today()->format('Y-m'))><x-icon name="right" /></button>
         </div>
-        @if ($byCategory->isNotEmpty())
-            <ul class="space-y-2 border-t border-line pt-3">
-                @foreach ($byCategory as $row)
-                    <li class="grid grid-cols-[6.5rem_1fr_auto] items-center gap-3 text-sm">
-                        <span class="truncate text-muted">{{ $row['label'] }}</span>
-                        <span class="h-2 overflow-hidden rounded-full bg-sunken"><span class="block h-full rounded-full bg-spend" style="width: {{ $total > 0 ? $row['total'] / $total * 100 : 0 }}%"></span></span>
-                        <span class="num text-base font-bold">{{ Number::currency($row['total']) }}</span>
-                    </li>
-                @endforeach
-            </ul>
-        @endif
-    </div>
+    </x-page-header>
 
-    @if ($this->expenses->isEmpty())
-        <x-empty icon="wallet" title="Sin gastos este mes">
-            Registra lo que compras (carne, tortilla, gas) para saber cuánto cuesta operar.
-            <x-slot:action><button type="button" wire:click="create" class="btn-primary">Registrar el primer gasto</button></x-slot:action>
-        </x-empty>
-    @else
-        @foreach ($this->expenses->groupBy(fn ($e) => $e->spent_on->toDateString()) as $day => $group)
-            <section wire:key="day-{{ $day }}" class="space-y-2">
-                <div class="flex items-baseline justify-between px-1">
-                    <h2 class="font-semibold">{{ ucfirst(\Carbon\CarbonImmutable::parse($day)->translatedFormat('l d')) }}</h2>
-                    <span class="num text-lg font-bold text-muted">{{ Number::currency((float) $group->sum('total')) }}</span>
-                </div>
-                <ul class="card divide-y divide-line !p-0">
-                    @foreach ($group as $e)
-                        <li wire:key="e-{{ $e->id }}" class="flex items-center gap-3 px-4 py-3">
-                            <div class="min-w-0 flex-1">
-                                <p class="truncate font-semibold">
-                                    {{ $e->ingredient?->name ?? $e->description ?? $e->category->label() }}
-                                    @if ($e->ingredient && $e->quantity)
-                                        <span class="font-normal text-muted">{{ rtrim(rtrim((string) $e->quantity, '0'), '.') }} {{ $e->ingredient->unit }}</span>
-                                    @endif
-                                </p>
-                                <p class="truncate text-sm text-muted">
-                                    {{ $e->category->label() }}@if ($e->supplier), {{ $e->supplier }}@endif
-                                    @unless ($e->from_cash) <span class="badge bg-sunken text-muted">No salió de caja</span> @endunless
-                                </p>
-                            </div>
-                            <span class="num text-2xl font-bold">{{ Number::currency((float) $e->total) }}</span>
-                            <button type="button" wire:click="delete({{ $e->id }})" wire:confirm="¿Borrar este gasto?" class="btn-quiet size-9 justify-center !px-0" aria-label="Borrar gasto">
-                                <x-icon name="trash" class="size-4" />
-                            </button>
+    <div class="space-y-5">
+        <section class="card !p-5">
+            <p class="text-sm font-semibold text-muted">Gastado en el mes</p>
+            <p class="num text-[3rem] leading-none font-bold">{{ money($total) }}</p>
+            @if ($byCategory->isNotEmpty())
+                <ul class="mt-4 space-y-2.5 border-t border-line pt-4">
+                    @foreach ($byCategory as $row)
+                        <li class="grid grid-cols-[1.25rem_6rem_1fr_auto] items-center gap-2.5 text-sm">
+                            <x-icon :name="$row['category']->icon()" class="size-4 text-muted" />
+                            <span class="truncate font-medium">{{ $row['category']->label() }}</span>
+                            <span class="h-1.5 overflow-hidden rounded-full bg-sunken"><span class="block h-full rounded-full bg-spend" style="width: {{ $total > 0 ? $row['total'] / $total * 100 : 0 }}%"></span></span>
+                            <span class="num w-20 text-right text-base font-bold">{{ money($row['total']) }}</span>
                         </li>
                     @endforeach
                 </ul>
-            </section>
-        @endforeach
-    @endif
+            @endif
+        </section>
+
+        @if ($this->expenses->isEmpty())
+            <x-empty icon="wallet" title="Sin gastos este mes">
+                Registra lo que compras, como carne, tortilla o gas, para saber cuánto cuesta operar.
+                <x-slot:action><button type="button" wire:click="create" class="btn-primary">Registrar un gasto</button></x-slot:action>
+            </x-empty>
+        @else
+            @foreach ($this->expenses->groupBy(fn ($e) => $e->spent_on->toDateString()) as $day => $group)
+                <section wire:key="day-{{ $day }}" class="space-y-2">
+                    <div class="flex items-baseline justify-between px-1">
+                        <h2 class="font-semibold">{{ ucfirst(\Carbon\CarbonImmutable::parse($day)->translatedFormat('l j')) }}</h2>
+                        <span class="num text-base font-bold text-muted">{{ money($group->sum('total')) }}</span>
+                    </div>
+                    <ul class="list">
+                        @foreach ($group as $e)
+                            @php
+                                $title = $e->ingredient?->name ?? $e->description ?? $e->category->label();
+                                $meta = array_filter([
+                                    $e->ingredient && $e->quantity ? rtrim(rtrim((string) $e->quantity, '0'), '.').' '.$e->ingredient->unit : null,
+                                    $e->supplier,
+                                    $e->ingredient && $e->description ? $e->description : null,
+                                ]);
+                            @endphp
+                            <li wire:key="e-{{ $e->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
+                                <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-sunken text-muted"><x-icon :name="$e->category->icon()" class="size-5" /></span>
+                                <div class="min-w-0 flex-1">
+                                    <p class="truncate font-semibold">{{ $title }}</p>
+                                    <p class="flex items-center gap-2 truncate text-sm text-muted">
+                                        @if ($meta) <span class="truncate">{{ implode(', ', $meta) }}</span> @elseif ($title !== $e->category->label()) <span>{{ $e->category->label() }}</span> @endif
+                                        @unless ($e->from_cash) <span class="badge bg-sunken text-muted">Fuera de caja</span> @endunless
+                                    </p>
+                                </div>
+                                <span class="num text-[1.375rem] font-bold">{{ money($e->total) }}</span>
+                                <button type="button" wire:click="delete({{ $e->id }})" wire:confirm="¿Borrar este gasto?" class="btn-quiet size-10 justify-center !px-0" aria-label="Borrar gasto">
+                                    <x-icon name="trash" class="size-4" />
+                                </button>
+                            </li>
+                        @endforeach
+                    </ul>
+                </section>
+            @endforeach
+        @endif
+    </div>
 
     @if ($showForm)
         <x-sheet title="Nuevo gasto">
-            <form wire:submit="save" id="expense-form" class="space-y-4">
+            <form wire:submit="save" id="expense-form" class="space-y-5">
                 <div>
-                    <p class="label">¿Qué compraste?</p>
-                    <div class="flex flex-wrap gap-2">
-                        @foreach (App\Enums\ExpenseCategory::cases() as $c)
-                            <button type="button" wire:click="setCategory('{{ $c->value }}')" aria-pressed="{{ $category === $c->value ? 'true' : 'false' }}" class="chip">{{ $c->label() }}</button>
+                    <p class="label">Tipo</p>
+                    <div class="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                        @foreach (\App\Enums\ExpenseCategory::cases() as $c)
+                            <button type="button" wire:click="setCategory('{{ $c->value }}')" aria-pressed="{{ $category === $c->value ? 'true' : 'false' }}"
+                                    class="flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl border text-sm font-semibold motion-safe:transition {{ $category === $c->value ? 'border-ink bg-ink text-bg' : 'border-line bg-surface text-ink hover:bg-sunken' }}">
+                                <x-icon :name="$c->icon()" class="size-5" />
+                                {{ $c->label() }}
+                            </button>
                         @endforeach
                     </div>
                 </div>
 
                 @if ($category === 'ingredients')
-                    <div>
-                        <label class="label" for="ingredient_id">Insumo</label>
-                        <select id="ingredient_id" wire:model.live="ingredient_id" class="input">
-                            <option value="">Otro / sin especificar</option>
-                            @foreach ($this->ingredients as $i)
-                                <option value="{{ $i->id }}">{{ $i->name }} ({{ $i->unit }})</option>
-                            @endforeach
-                        </select>
-                        @if ($this->ingredients->isEmpty())
-                            <p class="hint">Aún no tienes insumos. <a href="{{ route('insumos') }}" wire:navigate class="font-semibold text-chile underline">Da de alta uno</a> para que el costo de tus recetas se actualice solo.</p>
-                        @endif
-                    </div>
-                    @if ($ingredient_id)
+                    <div class="grid grid-cols-[1fr_8rem] gap-3">
                         <div>
-                            <label class="label" for="quantity">Cantidad comprada ({{ $this->ingredients[$ingredient_id]->unit ?? '' }})</label>
-                            <input id="quantity" type="number" inputmode="decimal" step="any" wire:model.live.debounce.300ms="quantity" class="input">
-                            @error('quantity') <p class="error">{{ $message }}</p> @enderror
+                            <label class="label" for="ingredient_id">Insumo</label>
+                            <select id="ingredient_id" wire:model.live="ingredient_id" class="input">
+                                <option value="">Otro</option>
+                                @foreach ($this->ingredients as $i)
+                                    <option value="{{ $i->id }}">{{ $i->name }}</option>
+                                @endforeach
+                            </select>
                         </div>
+                        <div>
+                            <label class="label" for="quantity">Cantidad</label>
+                            <div class="relative">
+                                <input id="quantity" type="number" inputmode="decimal" step="any" wire:model.live.debounce.300ms="quantity" @disabled(! $ingredient_id) class="input pr-12 disabled:opacity-50">
+                                <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm text-muted">{{ $ingredient_id ? ($this->ingredients[$ingredient_id]->unit ?? '') : '' }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    @error('quantity') <p class="error -mt-3">{{ $message }}</p> @enderror
+                    @if ($this->ingredients->isEmpty())
+                        <p class="hint -mt-3">Aún no tienes insumos. <a href="{{ route('insumos') }}" wire:navigate class="font-semibold text-chile underline">Da de alta uno</a> para que el costo de tus recetas se actualice solo.</p>
                     @endif
                 @endif
 
                 <div>
                     <label class="label" for="total">Total pagado</label>
-                    <input id="total" type="number" inputmode="decimal" step="0.01" wire:model.live.debounce.300ms="total" class="input" placeholder="0.00">
+                    <x-money-input id="total" wire:model.live.debounce.300ms="total" placeholder="0" class="!min-h-14 !text-2xl" />
                     @error('total') <p class="error">{{ $message }}</p> @enderror
                     @if ($this->unitPrice)
-                        <p class="hint">Sale a <span class="font-semibold text-ink">{{ $this->unitPrice }}</span>. Se usará como costo del insumo.</p>
+                        <p class="hint">Sale a <span class="font-semibold text-ink">{{ $this->unitPrice }}</span>. Se guardará como costo del insumo.</p>
                     @endif
                 </div>
 
                 <div class="grid gap-4 sm:grid-cols-2">
                     <div>
-                        <label class="label" for="supplier">Proveedor</label>
-                        <input id="supplier" type="text" list="suppliers" wire:model="supplier" class="input" placeholder="Opcional">
+                        <label class="label" for="supplier">Proveedor <span class="font-normal text-muted">(opcional)</span></label>
+                        <input id="supplier" type="text" list="suppliers" wire:model="supplier" class="input">
                         <datalist id="suppliers">
                             @foreach ($this->suppliers as $s) <option value="{{ $s }}"> @endforeach
                         </datalist>
@@ -289,13 +302,13 @@ new #[Title('Gastos')] class extends Component
                 </div>
 
                 <div>
-                    <label class="label" for="description">Nota</label>
-                    <input id="description" type="text" wire:model="description" class="input" placeholder="Opcional">
+                    <label class="label" for="description">Nota <span class="font-normal text-muted">(opcional)</span></label>
+                    <input id="description" type="text" wire:model="description" class="input">
                 </div>
 
-                <label class="flex items-center justify-between gap-4 rounded-xl bg-sunken px-4 py-3">
+                <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
                     <span>
-                        <span class="block text-sm font-semibold">Salió de la caja</span>
+                        <span class="block font-semibold">Se pagó con dinero de la caja</span>
                         <span class="block text-sm text-muted">Se descuenta del efectivo en el corte.</span>
                     </span>
                     <input type="checkbox" wire:model="from_cash" class="switch">

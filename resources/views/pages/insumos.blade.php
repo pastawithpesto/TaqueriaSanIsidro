@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Ingredient;
-use Illuminate\Support\Number;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -103,46 +102,58 @@ new #[Title('Insumos')] class extends Component
 };
 ?>
 
-<div class="space-y-5">
-    <div class="flex items-center gap-2">
-        <input type="search" wire:model.live.debounce.250ms="search" class="input flex-1" placeholder="Buscar insumo" aria-label="Buscar insumo">
-        <button type="button" wire:click="create" class="btn-primary h-12"><x-icon name="plus" class="size-4" /> Nuevo</button>
-    </div>
+<div>
+    <x-page-header title="Insumos">
+        <x-slot:actions>
+            <button type="button" wire:click="create" class="btn-primary"><x-icon name="plus" class="size-4" /> Insumo</button>
+        </x-slot:actions>
+        @if ($this->hasAny)
+            <div class="relative">
+                <x-icon name="search" class="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted" />
+                <input type="search" wire:model.live.debounce.250ms="search" class="input !min-h-11 !pl-10" placeholder="Buscar insumo" aria-label="Buscar insumo">
+            </div>
+        @endif
+    </x-page-header>
 
+    <div class="space-y-4">
     @if (! $this->hasAny)
         <x-empty icon="package" title="Empieza por tus insumos">
-            Son lo que compras para cocinar: carne, tortillas, cebolla, cilantro, gas. Con su costo la app calcula cuánto ganas por cada taco.
+            Son lo que compras para cocinar: carne, tortillas, cebolla, cilantro. Con su costo la app calcula cuánto ganas por cada taco.
             <x-slot:action><button type="button" wire:click="create" class="btn-primary">Agregar el primer insumo</button></x-slot:action>
         </x-empty>
     @elseif ($this->ingredients->isEmpty())
-        <p class="py-6 text-center text-sm text-muted">Ningún insumo coincide con "{{ $search }}".</p>
+        <p class="py-8 text-center text-sm text-muted">Ningún insumo coincide con "{{ $search }}".</p>
     @else
-        <ul class="card divide-y divide-line !p-0">
+        <ul class="list">
             @foreach ($this->ingredients as $i)
-                <li wire:key="i-{{ $i->id }}" @class(['flex items-center gap-3 px-4 py-3', 'opacity-55' => ! $i->active])>
-                    <div class="min-w-0 flex-1">
-                        <p class="truncate font-semibold">{{ $i->name }} @unless ($i->active) <span class="badge bg-sunken text-muted">Inactivo</span> @endunless</p>
-                        <p class="text-sm text-muted">En {{ $i->products_count }} {{ $i->products_count === 1 ? 'receta' : 'recetas' }}</p>
-                    </div>
-                    <p class="text-right">
-                        <span class="num block text-2xl font-bold leading-none">{{ Number::currency((float) $i->cost_per_unit) }}</span>
-                        <span class="text-xs text-muted">por {{ $i->unit }}</span>
-                    </p>
+                <li wire:key="i-{{ $i->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
+                    <button type="button" wire:click="edit({{ $i->id }})" class="min-w-0 flex-1 text-left">
+                        <span @class(['block truncate font-semibold', 'text-muted' => ! $i->active])>{{ $i->name }}</span>
+                        <span class="mt-0.5 flex items-center gap-2 text-sm text-muted">
+                            @unless ($i->active) <span class="badge bg-sunken text-muted">Inactivo</span> @endunless
+                            {{ $i->products_count === 0 ? 'Sin usar en recetas' : 'En '.$i->products_count.' '.($i->products_count === 1 ? 'receta' : 'recetas') }}
+                        </span>
+                    </button>
+                    <span class="text-right">
+                        <span class="num block text-[1.375rem] leading-tight font-bold">{{ money($i->cost_per_unit) }}</span>
+                        <span class="block text-xs text-muted">por {{ $i->unit }}</span>
+                    </span>
                     <div x-data="{ menu: false }" class="relative">
-                        <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-9 justify-center !px-0" aria-label="Opciones de {{ $i->name }}"><x-icon name="more" /></button>
-                        <div x-show="menu" x-cloak class="absolute right-0 top-10 z-20 w-44 rounded-xl border border-line bg-surface p-1 shadow-xl" @click="menu = false">
-                            <button type="button" wire:click="edit({{ $i->id }})" class="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold hover:bg-sunken"><x-icon name="pencil" class="size-4" /> Editar</button>
-                            <button type="button" wire:click="toggle({{ $i->id }})" class="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold hover:bg-sunken"><x-icon name="check" class="size-4" /> {{ $i->active ? 'Desactivar' : 'Activar' }}</button>
+                        <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $i->name }}"><x-icon name="more" /></button>
+                        <div x-show="menu" x-cloak x-transition.origin.top.right class="menu" @click="menu = false">
+                            <button type="button" wire:click="edit({{ $i->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
+                            <button type="button" wire:click="toggle({{ $i->id }})"><x-icon :name="$i->active ? 'eye-off' : 'eye'" class="size-4 text-muted" /> {{ $i->active ? 'Desactivar' : 'Activar' }}</button>
                             @if ($i->products_count === 0)
-                                <button type="button" wire:click="delete({{ $i->id }})" wire:confirm="¿Borrar este insumo?" class="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold text-chile hover:bg-chile-soft"><x-icon name="trash" class="size-4" /> Borrar</button>
+                                <button type="button" wire:click="delete({{ $i->id }})" wire:confirm="¿Borrar este insumo?" class="text-chile"><x-icon name="trash" class="size-4" /> Borrar</button>
                             @endif
                         </div>
                     </div>
                 </li>
             @endforeach
         </ul>
-        <p class="text-center text-sm text-muted">El costo se actualiza solo cuando registras una compra del insumo en Gastos.</p>
+        <p class="flex justify-center gap-2 px-4 text-center text-sm text-muted"><x-icon name="info" class="mt-0.5 size-4 shrink-0" /> El costo se actualiza solo al registrar una compra en Gastos.</p>
     @endif
+    </div>
 
     @if ($showForm)
         <x-sheet :title="$editingId ? 'Editar insumo' : 'Nuevo insumo'">
@@ -163,7 +174,7 @@ new #[Title('Insumos')] class extends Component
                     </div>
                     <div>
                         <label class="label" for="cost">Costo por {{ $unit }}</label>
-                        <input id="cost" type="number" inputmode="decimal" step="any" min="0" wire:model="cost_per_unit" class="input">
+                        <x-money-input id="cost" step="any" wire:model="cost_per_unit" />
                         @error('cost_per_unit') <p class="error">{{ $message }}</p> @enderror
                     </div>
                 </div>

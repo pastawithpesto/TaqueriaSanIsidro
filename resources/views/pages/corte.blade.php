@@ -5,7 +5,6 @@ use App\Models\CashClose;
 use App\Models\Expense;
 use App\Models\Order;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Number;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -69,6 +68,24 @@ new #[Title('Corte de caja')] class extends Component
         } catch (Throwable) {
             return CarbonImmutable::today();
         }
+    }
+
+    #[Computed]
+    public function dayLabel(): string
+    {
+        $day = $this->day();
+
+        return match (true) {
+            $day->isToday() => 'Hoy',
+            $day->isYesterday() => 'Ayer',
+            default => ucfirst($day->translatedFormat('l')),
+        };
+    }
+
+    #[Computed]
+    public function saved(): ?CashClose
+    {
+        return CashClose::whereDate('closed_on', $this->day())->first();
     }
 
     #[Computed]
@@ -136,83 +153,116 @@ new #[Title('Corte de caja')] class extends Component
             'notes' => $this->notes ?: null,
         ])->save();
 
-        unset($this->history);
+        unset($this->history, $this->saved);
         $this->dispatch('toast', message: 'Corte guardado');
     }
 };
 ?>
 
-<div class="space-y-5">
-    <div class="flex items-center gap-2">
-        <button type="button" wire:click="shift(-1)" class="btn size-11 !px-0" aria-label="Día anterior"><x-icon name="left" /></button>
-        <input type="date" wire:model.live="date" class="input flex-1 text-center font-semibold" max="{{ today()->toDateString() }}" aria-label="Fecha">
-        <button type="button" wire:click="shift(1)" class="btn size-11 !px-0" aria-label="Día siguiente" @disabled($date >= today()->toDateString())><x-icon name="right" /></button>
-    </div>
+@php
+    $day = \Carbon\CarbonImmutable::parse($date);
+    $diff = $this->difference;
+@endphp
 
-    <div class="card space-y-3">
-        <div>
-            <label class="label" for="opening">Fondo inicial en caja</label>
-            <input id="opening" type="number" inputmode="decimal" step="0.01" min="0" wire:model.live.debounce.300ms="opening" class="input">
-            @error('opening') <p class="error">{{ $message }}</p> @enderror
-        </div>
+<div>
+    <x-page-header title="Corte de caja">
+        <x-date-nav :label="$this->dayLabel" :detail="$day->translatedFormat('j M')" :max="today()->toDateString()" :at-max="$day->gte(today())" />
+    </x-page-header>
 
-        <dl class="divide-y divide-line text-[15px]">
-            <div class="flex justify-between py-2"><dt class="text-muted">Ventas en efectivo</dt><dd class="num text-xl font-bold">{{ Number::currency($this->cashSales) }}</dd></div>
-            <div class="flex justify-between py-2"><dt class="text-muted">Gastos pagados de la caja</dt><dd class="num text-xl font-bold">-{{ Number::currency($this->cashExpenses) }}</dd></div>
-            <div class="flex items-end justify-between py-3"><dt class="font-semibold">Debe haber en caja</dt><dd class="num text-4xl font-bold leading-none">{{ Number::currency($this->expected) }}</dd></div>
-        </dl>
-        @if ($this->otherSales > 0)
-            <p class="text-sm text-muted">Además hubo {{ Number::currency($this->otherSales) }} en transferencia o tarjeta, que no entra a la caja.</p>
-        @endif
-    </div>
-
-    <div class="card space-y-3">
-        <div>
-            <label class="label" for="counted">Efectivo contado</label>
-            <input id="counted" type="number" inputmode="decimal" step="0.01" min="0" wire:model.live.debounce.300ms="counted" class="input" placeholder="Cuenta los billetes y monedas">
-            @error('counted') <p class="error">{{ $message }}</p> @enderror
-        </div>
-
-        @if ($this->difference !== null)
-            @php $diff = $this->difference; @endphp
-            <div @class([
-                'flex items-center justify-between rounded-xl px-4 py-3',
-                'bg-salsa-soft text-salsa' => $diff == 0,
-                'bg-limon-soft text-ink' => $diff > 0,
-                'bg-chile-soft text-chile' => $diff < 0,
-            ])>
-                <span class="text-sm font-semibold">{{ $diff == 0 ? 'La caja cuadra' : ($diff > 0 ? 'Sobra' : 'Falta') }}</span>
-                <span class="num text-4xl font-bold leading-none">{{ $diff == 0 ? '$0.00' : Number::currency(abs($diff)) }}</span>
-            </div>
-        @endif
-
-        <div>
-            <label class="label" for="notes">Nota</label>
-            <input id="notes" type="text" wire:model="notes" class="input" placeholder="Opcional">
-        </div>
-
-        <button type="button" wire:click="save" class="btn-primary btn-lg w-full" wire:loading.attr="disabled">Guardar corte</button>
-    </div>
-
-    @if ($this->history->isNotEmpty())
-        <section class="space-y-2">
-            <h2 class="font-display text-xl font-bold">Cortes anteriores</h2>
-            <ul class="card divide-y divide-line !p-0">
-                @foreach ($this->history as $close)
-                    <li class="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                        <span class="font-semibold">{{ $close->closed_on->translatedFormat('D d M') }}</span>
-                        <span class="num text-lg font-bold">{{ Number::currency((float) $close->counted) }}</span>
-                        <span @class([
-                            'badge',
-                            'bg-salsa-soft text-salsa' => (float) $close->difference == 0,
-                            'bg-limon-soft text-ink' => (float) $close->difference > 0,
-                            'bg-chile-soft text-chile' => (float) $close->difference < 0,
-                        ])>
-                            {{ (float) $close->difference == 0 ? 'Cuadra' : ((float) $close->difference > 0 ? 'Sobra ' : 'Falta ').Number::currency(abs((float) $close->difference)) }}
-                        </span>
-                    </li>
-                @endforeach
-            </ul>
+    <div class="mx-auto max-w-xl space-y-4">
+        <section class="card !p-0">
+            <dl class="divide-y divide-line">
+                <div class="flex items-center justify-between gap-4 px-4 py-3">
+                    <dt>
+                        <label for="opening" class="font-semibold">Fondo inicial</label>
+                        <p class="text-sm text-muted">Con lo que abriste la caja</p>
+                    </dt>
+                    <dd class="w-36"><x-money-input id="opening" wire:model.live.debounce.300ms="opening" class="!min-h-11 text-right !text-lg" /></dd>
+                </div>
+                <div class="flex items-center justify-between px-4 py-3">
+                    <dt class="text-muted">Ventas en efectivo</dt>
+                    <dd class="num text-xl font-bold">{{ $this->cashSales > 0 ? '+' : '' }}{{ money($this->cashSales) }}</dd>
+                </div>
+                <div class="flex items-center justify-between px-4 py-3">
+                    <dt class="text-muted">Gastos pagados de la caja</dt>
+                    <dd class="num text-xl font-bold">{{ $this->cashExpenses > 0 ? '−'.money($this->cashExpenses) : money(0) }}</dd>
+                </div>
+                <div class="flex items-end justify-between bg-sunken/60 px-4 py-4">
+                    <dt class="font-semibold">Debe haber en caja</dt>
+                    <dd class="num text-[2.5rem] leading-none font-bold">{{ money($this->expected) }}</dd>
+                </div>
+            </dl>
+            @error('opening') <p class="error px-4 pb-3">{{ $message }}</p> @enderror
         </section>
-    @endif
+
+        @if ($this->otherSales > 0)
+            <p class="flex gap-2 px-1 text-sm text-muted">
+                <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
+                <span>Además se cobraron {{ money($this->otherSales) }} por transferencia o tarjeta. Ese dinero no entra a la caja.</span>
+            </p>
+        @endif
+
+        <section class="card space-y-4 !p-5">
+            <div>
+                <label class="label" for="counted">Efectivo contado</label>
+                <x-money-input id="counted" wire:model.live.debounce.300ms="counted" placeholder="0" class="!min-h-14 !text-2xl" />
+                <p class="hint">Cuenta billetes y monedas al cerrar.</p>
+                @error('counted') <p class="error">{{ $message }}</p> @enderror
+            </div>
+
+            @if ($diff !== null)
+                <div @class([
+                    'flex items-center justify-between gap-3 rounded-xl px-4 py-3.5',
+                    'bg-salsa-soft text-salsa' => abs($diff) < 0.005,
+                    'bg-limon-soft text-ink' => $diff >= 0.005,
+                    'bg-chile-soft text-chile' => $diff <= -0.005,
+                ])>
+                    <span class="flex items-center gap-2 text-sm font-bold">
+                        <x-icon :name="abs($diff) < 0.005 ? 'check' : 'alert'" class="size-5" />
+                        {{ abs($diff) < 0.005 ? 'La caja cuadra' : ($diff > 0 ? 'Sobra dinero' : 'Falta dinero') }}
+                    </span>
+                    @if (abs($diff) >= 0.005)
+                        <span class="num text-[2rem] leading-none font-bold">{{ money(abs($diff)) }}</span>
+                    @endif
+                </div>
+            @endif
+
+            <div>
+                <label class="label" for="notes">Nota <span class="font-normal text-muted">(opcional)</span></label>
+                <input id="notes" type="text" wire:model="notes" class="input" placeholder="Ej. se pagó al gas con efectivo de la caja">
+            </div>
+
+            <button type="button" wire:click="save" class="btn-primary btn-lg w-full" wire:loading.attr="disabled">
+                {{ $this->saved ? 'Actualizar corte' : 'Guardar corte' }}
+            </button>
+            @if ($this->saved)
+                <p class="-mt-2 text-center text-sm text-muted">Guardado a las {{ $this->saved->updated_at->format('g:i a') }}</p>
+            @endif
+        </section>
+
+        @if ($this->history->isNotEmpty())
+            <section class="space-y-2 pt-2">
+                <h2 class="section-title px-1">Cortes anteriores</h2>
+                <ul class="list">
+                    @foreach ($this->history as $close)
+                        @php $d = (float) $close->difference; @endphp
+                        <li class="flex items-center gap-3 px-4 py-3">
+                            <span class="flex-1">
+                                <span class="block font-semibold">{{ ucfirst($close->closed_on->translatedFormat('l j M')) }}</span>
+                                <span class="block text-sm text-muted">Contado {{ money($close->counted) }}</span>
+                            </span>
+                            <span @class([
+                                'badge !text-sm',
+                                'bg-salsa-soft text-salsa' => abs($d) < 0.005,
+                                'bg-limon-soft text-ink' => $d >= 0.005,
+                                'bg-chile-soft text-chile' => $d <= -0.005,
+                            ])>
+                                {{ abs($d) < 0.005 ? 'Cuadró' : ($d > 0 ? 'Sobró ' : 'Faltó ').money(abs($d)) }}
+                            </span>
+                        </li>
+                    @endforeach
+                </ul>
+            </section>
+        @endif
+    </div>
 </div>

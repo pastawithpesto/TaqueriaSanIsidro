@@ -20,4 +20,15 @@ enum ExpenseCategory: string
             self::Other => 'Otros',
         };
     }
+
+    public function icon(): string
+    {
+        return match ($this) {
+            self::Ingredients => 'package',
+            self::Disposables => 'cup',
+            self::Gas => 'flame',
+            self::Equipment => 'wrench',
+            self::Other => 'more',
+        };
+    }
 }

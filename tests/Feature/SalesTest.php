@@ -137,7 +137,7 @@ class SalesTest extends TestCase
 
         Livewire::test('pages::vender')
             ->assertSee('Taco')
-            ->assertSee('$20.00');
+            ->assertSee('$20');
     }
 
     public function test_cancelled_orders_are_excluded_from_daily_total(): void
@@ -145,7 +145,7 @@ class SalesTest extends TestCase
         $order = Order::create(['status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 50, 'sold_at' => now()]);
 
         Livewire::test('pages::ventas')
-            ->assertSee('$50.00')
+            ->assertSee('$50')
             ->call('cancel', $order->id)
             ->assertSee('Cancelada');
 

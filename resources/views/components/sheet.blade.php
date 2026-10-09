@@ -8,8 +8,9 @@
      role="dialog" aria-modal="true" aria-label="{{ $title }}">
     <div class="absolute inset-0 bg-black/55" @click="{{ $closeJs }}"></div>
     <div class="sheet-in relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-surface shadow-2xl md:max-w-xl md:rounded-3xl">
-        <div class="flex items-center justify-between gap-3 px-5 pb-2 pt-4">
-            <h2 class="font-display text-2xl font-bold leading-none">{{ $title }}</h2>
+        <div class="mx-auto mt-2 h-1 w-10 rounded-full bg-line md:hidden"></div>
+        <div class="flex items-center justify-between gap-3 px-5 pt-3 pb-2 md:pt-5">
+            <h2 class="section-title !text-2xl">{{ $title }}</h2>
             <button type="button" @click="{{ $closeJs }}" class="btn-quiet -mr-2" aria-label="Cerrar">
                 <x-icon name="x" />
             </button>
