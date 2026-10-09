@@ -29,14 +29,12 @@ class SalesTest extends TestCase
         $torta = Product::create(['name' => 'Torta', 'price' => 39]);
 
         Livewire::test('pages::vender')
-            ->call('add', $taco->id)
-            ->call('add', $taco->id)
-            ->call('add', $torta->id)
-            ->assertSet('cart', [$taco->id => 2, $torta->id => 1])
+            ->set('cart', [$taco->id => 2, $torta->id => 1])
             ->set('method', 'transfer')
             ->set('reference', 'ABC123')
             ->call('charge')
-            ->assertSet('cart', []);
+            ->assertSet('cart', [])
+            ->assertSet('method', 'cash');
 
         $order = Order::with('items')->sole();
         $this->assertSame('79.00', $order->total);
@@ -53,56 +51,32 @@ class SalesTest extends TestCase
         $this->assertSame('10.0000', $item->fresh()->unit_cost);
     }
 
-    public function test_remove_decrements_and_drops_empty_lines(): void
+    public function test_server_ignores_client_totals_and_uses_database_prices(): void
     {
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
 
-        Livewire::test('pages::vender')
-            ->call('add', $taco->id)
-            ->call('add', $taco->id)
-            ->call('remove', $taco->id)
-            ->assertSet('cart', [$taco->id => 1])
-            ->call('remove', $taco->id)
-            ->assertSet('cart', []);
+        Livewire::test('pages::vender')->set('cart', [$taco->id => 3])->call('charge');
+
+        $this->assertSame('60.00', Order::sole()->total);
     }
 
-    public function test_charge_with_empty_cart_does_nothing(): void
+    public function test_charge_with_empty_or_invalid_cart_does_nothing(): void
     {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
         Livewire::test('pages::vender')->call('charge');
+        Livewire::test('pages::vender')->set('cart', [$taco->id => 0, 9999 => 2])->call('charge');
 
         $this->assertSame(0, Order::count());
     }
 
-    public function test_inactive_products_cannot_be_added(): void
+    public function test_inactive_products_cannot_be_charged(): void
     {
         $p = Product::create(['name' => 'Viejo', 'price' => 10, 'active' => false]);
 
-        Livewire::test('pages::vender')->call('add', $p->id)->assertSet('cart', []);
-    }
+        Livewire::test('pages::vender')->set('cart', [$p->id => 1])->call('charge');
 
-    public function test_cash_change_is_computed(): void
-    {
-        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
-
-        Livewire::test('pages::vender')
-            ->call('add', $taco->id)
-            ->call('add', $taco->id)
-            ->call('openPay')
-            ->set('received', '100')
-            ->assertSee('Cambio')
-            ->assertSet('change', 60.0);
-    }
-
-    public function test_cancelled_orders_are_excluded_from_daily_total(): void
-    {
-        $order = Order::create(['status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 50, 'sold_at' => now()]);
-
-        Livewire::test('pages::ventas')
-            ->assertSee('$50.00')
-            ->call('cancel', $order->id)
-            ->assertSee('Cancelada');
-
-        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->status);
+        $this->assertSame(0, Order::count());
     }
 
     public function test_cash_shortfall_blocks_the_charge(): void
@@ -110,8 +84,7 @@ class SalesTest extends TestCase
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
 
         Livewire::test('pages::vender')
-            ->call('add', $taco->id)
-            ->call('openPay')
+            ->set('cart', [$taco->id => 1])
             ->set('received', '10')
             ->call('charge')
             ->assertHasErrors('received');
@@ -119,13 +92,25 @@ class SalesTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
+    public function test_cash_received_enough_is_accepted(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::vender')
+            ->set('cart', [$taco->id => 2])
+            ->set('received', '100')
+            ->call('charge')
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, Order::count());
+    }
+
     public function test_undo_cancels_last_sale_and_restores_cart(): void
     {
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
 
         Livewire::test('pages::vender')
-            ->call('add', $taco->id)
-            ->call('add', $taco->id)
+            ->set('cart', [$taco->id => 2])
             ->call('charge')
             ->assertSet('cart', [])
             ->call('undo')
@@ -139,10 +124,31 @@ class SalesTest extends TestCase
     {
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
 
-        $component = Livewire::test('pages::vender')->call('add', $taco->id)->call('charge');
+        $component = Livewire::test('pages::vender')->set('cart', [$taco->id => 1])->call('charge');
         $this->travel(15)->minutes();
         $component->call('undo');
 
         $this->assertSame(OrderStatus::Paid, Order::sole()->status);
+    }
+
+    public function test_sell_page_ships_the_catalog_to_the_browser(): void
+    {
+        Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::vender')
+            ->assertSee('Taco')
+            ->assertSee('$20.00');
+    }
+
+    public function test_cancelled_orders_are_excluded_from_daily_total(): void
+    {
+        $order = Order::create(['status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 50, 'sold_at' => now()]);
+
+        Livewire::test('pages::ventas')
+            ->assertSee('$50.00')
+            ->call('cancel', $order->id)
+            ->assertSee('Cancelada');
+
+        $this->assertSame(OrderStatus::Cancelled, $order->fresh()->status);
     }
 }

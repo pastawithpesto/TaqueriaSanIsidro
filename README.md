@@ -45,9 +45,17 @@ docker compose logs -f app
 - Gastos: compras de insumos, gas, desechables, etc. Una compra de insumo con cantidad actualiza el costo por unidad.
 - Productos: precio, categoría y receta. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte.
 - Insumos: catálogo con unidad y costo.
-- Resumen: ventas, gastos, ganancia por receta y ventas menos gastos, por periodo.
+- Resumen: ventas, gastos, ganancia por receta y ventas menos gastos, por periodo, con comparativo y horas fuertes.
+- Corte de caja: efectivo esperado contra contado.
+- Ajustes: nombre y logo del negocio (se usan en el login, el menú y el ícono de la app instalable), y cambio de contraseña.
 
 Cada venta guarda el costo de receta del momento, así el historial no cambia si luego sube la carne.
+
+## Notas
+
+- Agregar y quitar productos en Vender ocurre en el navegador; el servidor solo interviene al cobrar y recalcula todo con los precios de la base.
+- El logo por defecto está en `public/images/brand/`. El que se sube desde Ajustes se guarda en `storage/app/private/branding/`.
+- Detrás de un túnel o proxy HTTPS: `TRUSTED_PROXIES=*` y `APP_URL` con la URL pública.
 
 ## Pendiente
 

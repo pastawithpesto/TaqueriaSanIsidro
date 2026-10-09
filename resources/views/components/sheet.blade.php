@@ -1,13 +1,16 @@
-@props(['title', 'close' => 'cancel'])
-<div x-data x-trap.noscroll="true"
-     @keydown.escape.window="$wire.{{ $close }}()"
+@props(['title', 'close' => 'cancel', 'open' => null])
+{{-- Con :open="expr" el cuadro se abre y cierra solo en el navegador (sin pasar por el servidor). --}}
+@php $closeJs = $open ? "$open = false" : "\$wire.$close()"; @endphp
+<div x-data
+     @if ($open) x-show="{{ $open }}" x-cloak x-trap.noscroll="{{ $open }}" @else x-trap.noscroll="true" @endif
+     @keydown.escape.window="{{ $closeJs }}"
      class="fixed inset-0 z-50 flex items-end justify-center md:items-center"
      role="dialog" aria-modal="true" aria-label="{{ $title }}">
-    <div class="absolute inset-0 bg-black/55" @click="$wire.{{ $close }}()"></div>
+    <div class="absolute inset-0 bg-black/55" @click="{{ $closeJs }}"></div>
     <div class="sheet-in relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-surface shadow-2xl md:max-w-xl md:rounded-3xl">
         <div class="flex items-center justify-between gap-3 px-5 pb-2 pt-4">
             <h2 class="font-display text-2xl font-bold leading-none">{{ $title }}</h2>
-            <button type="button" @click="$wire.{{ $close }}()" class="btn-quiet -mr-2" aria-label="Cerrar">
+            <button type="button" @click="{{ $closeJs }}" class="btn-quiet -mr-2" aria-label="Cerrar">
                 <x-icon name="x" />
             </button>
         </div>

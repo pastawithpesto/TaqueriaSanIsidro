@@ -1,3 +1,4 @@
+@use('App\Support\Branding')
 @php
     $main = [
         ['vender', 'Vender', 'sale'],
@@ -9,6 +10,7 @@
         ['corte', 'Corte de caja', 'banknote'],
         ['productos', 'Productos', 'tag'],
         ['insumos', 'Insumos', 'package'],
+        ['ajustes', 'Ajustes', 'settings'],
     ];
     $moreActive = collect($more)->contains(fn ($l) => request()->routeIs($l[0]));
 @endphp
@@ -21,11 +23,11 @@
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131010">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="San Isidro">
-    <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-    <title>{{ isset($title) ? $title.' | '.config('app.name') : config('app.name') }}</title>
+    <meta name="apple-mobile-web-app-title" content="{{ Branding::shortName() }}">
+    <link rel="manifest" href="{{ route('manifest') }}">
+    <link rel="icon" href="{{ Branding::logoUrl(64) }}" type="image/png">
+    <link rel="apple-touch-icon" href="{{ Branding::logoUrl(180) }}">
+    <title>{{ isset($title) ? $title.' | '.Branding::name() : Branding::name() }}</title>
     @fonts
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
@@ -35,8 +37,8 @@
         {{-- Barra lateral (escritorio) --}}
         <aside class="sticky top-0 hidden h-dvh flex-col border-r border-line bg-surface p-4 md:flex">
             <a href="{{ route('vender') }}" wire:navigate class="mb-6 flex items-center gap-3 px-2">
-                <x-logo class="size-10" />
-                <span class="font-display text-xl font-bold leading-[1.05]">Taquería<br>San Isidro</span>
+                <x-logo class="size-11" />
+                <span class="font-display text-xl font-bold leading-[1.05] text-balance">{{ Branding::name() }}</span>
             </a>
             <nav class="flex flex-col gap-1">
                 @foreach (array_merge($main, $more) as [$route, $label, $icon])
@@ -62,8 +64,8 @@
         <div class="min-w-0">
             <header class="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur md:static md:border-0 md:bg-transparent md:backdrop-blur-none">
                 <div class="mx-auto flex max-w-5xl items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-8">
-                    <x-logo class="size-8 md:hidden" />
-                    <h1 class="font-display text-[1.75rem] font-bold leading-none md:text-4xl">{{ $title ?? config('app.name') }}</h1>
+                    <x-logo class="size-9 md:hidden" />
+                    <h1 class="font-display text-[1.75rem] font-bold leading-none md:text-4xl">{{ $title ?? Branding::name() }}</h1>
                 </div>
             </header>
 

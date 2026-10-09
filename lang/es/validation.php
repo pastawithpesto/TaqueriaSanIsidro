@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'confirmed' => 'La confirmación de :attribute no coincide.',
+    'current_password' => 'La contraseña actual no es correcta.',
+    'image' => 'El archivo debe ser una imagen.',
+    'mimes' => 'El archivo debe ser de tipo: :values.',
+    'uploaded' => 'No se pudo subir el archivo. Revisa que pese menos de 10 MB.',
     'required' => 'El campo :attribute es obligatorio.',
     'required_with' => 'El campo :attribute es obligatorio.',
     'required_if' => 'El campo :attribute es obligatorio.',
@@ -42,5 +47,10 @@ return [
         'ingredient_id' => 'insumo',
         'method' => 'método de pago',
         'reference' => 'referencia',
+        'business_name' => 'nombre',
+        'short_name' => 'nombre corto',
+        'logo' => 'logo',
+        'current_password' => 'contraseña actual',
+        'new_password' => 'contraseña nueva',
     ],
 ];
