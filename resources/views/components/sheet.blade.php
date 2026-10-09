@@ -1,7 +1,7 @@
 @props(['title', 'close' => 'cancel', 'open' => null, 'dismiss' => null])
 {{-- Con :open="expr" el cuadro se abre y cierra solo en el navegador (sin pasar por el servidor). --}}
 @php $closeJs = $dismiss ?? ($open ? "$open = false" : "\$wire.$close()"); @endphp
-<div x-data
+<div x-data {{ $attributes->except(['x-text', 'class']) }}
      @if ($open) x-show="{{ $open }}" x-cloak x-trap.noscroll="{{ $open }}" @else x-trap.noscroll="true" @endif
      @keydown.escape.window="{{ $open ? "if ($open) { $closeJs }" : $closeJs }}"
      class="fixed inset-0 z-50 flex items-end justify-center md:items-center"

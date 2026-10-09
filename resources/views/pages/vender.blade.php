@@ -36,6 +36,19 @@ new #[Title('Vender')] class extends Component
 
     public string $method = 'cash';
 
+    /** Descuento al pedido: monto en pesos o porcentaje. */
+    public ?string $discount = null;
+
+    public string $discountType = 'amount';
+
+    /** Propina en pesos (no cuenta como venta). */
+    public ?string $tip = null;
+
+    /** Pago mixto: cuánto en efectivo y con qué se paga el resto. */
+    public ?string $cashPart = null;
+
+    public string $otherMethod = 'transfer';
+
     public ?string $reference = null;
 
     public ?string $received = null;
@@ -65,6 +78,7 @@ new #[Title('Vender')] class extends Component
         $this->lines = OrderBuilder::linesFrom($order);
         $this->label = $order->label;
         $this->service = $order->service ?? 'togo';
+        $this->discount = (float) $order->discount > 0 ? rtrim(rtrim((string) $order->discount, '0'), '.') : null;
         $this->pickupTime = $order->pickup_at?->format('H:i');
         // Desde Pedidos, "Cobrar" abre directo el cuadro de cobro.
         $this->openPay = request()->boolean('cobrar');
@@ -139,6 +153,37 @@ new #[Title('Vender')] class extends Component
         return $service === 'togo' ? $this->packagingFee : 0.0;
     }
 
+    /** Descuento en pesos sobre productos + empaque (nunca más que eso). */
+    protected function discountFor(float $base): float
+    {
+        $value = is_numeric($this->discount) ? max(0, (float) $this->discount) : 0;
+        $amount = $this->discountType === 'percent' ? $base * min(100, $value) / 100 : $value;
+
+        return round(min($base, $amount), 2);
+    }
+
+    protected function tipAmount(): float
+    {
+        return is_numeric($this->tip) ? round(max(0, (float) $this->tip), 2) : 0.0;
+    }
+
+    /** @return array<int, array{method: string, amount: float, reference: ?string}> */
+    protected function paymentsFor(float $due): array
+    {
+        $reference = $this->reference ?: null;
+
+        if ($this->method !== 'mixed') {
+            return [['method' => $this->method, 'amount' => $due, 'reference' => $this->method === 'cash' ? null : $reference]];
+        }
+
+        $cash = round(min($due, max(0, (float) $this->cashPart)), 2);
+
+        return array_values(array_filter([
+            ['method' => 'cash', 'amount' => $cash, 'reference' => null],
+            ['method' => $this->otherMethod, 'amount' => round($due - $cash, 2), 'reference' => $reference],
+        ], fn ($p) => $p['amount'] > 0));
+    }
+
     protected function title(Order $order): string
     {
         return '#'.$order->daily_number.($order->label ? ' '.$order->label : '');
@@ -158,6 +203,7 @@ new #[Title('Vender')] class extends Component
             ]);
 
             $paid = $status === OrderStatus::Paid;
+            $base = $built['total'] + $this->feeFor($this->service);
 
             $order->fill([
                 'status' => $status,
@@ -168,10 +214,17 @@ new #[Title('Vender')] class extends Component
                 'payment_method' => $paid ? $this->method : null,
                 'payment_reference' => $paid && $this->method !== 'cash' ? ($this->reference ?: null) : null,
                 'paid_at' => $paid ? now() : null,
-                'total' => $built['total'] + $this->feeFor($this->service),
+                'discount' => $this->discountFor($base),
+                'tip' => $paid ? $this->tipAmount() : 0,
+                'total' => max(0, $base - $this->discountFor($base)),
             ])->save();
 
             OrderBuilder::fill($order, $built);
+
+            if ($paid) {
+                $order->payments()->delete();
+                $order->payments()->createMany($this->paymentsFor((float) $order->total + (float) $order->tip));
+            }
 
             return $order;
         });
@@ -179,8 +232,10 @@ new #[Title('Vender')] class extends Component
 
     protected function finish(): void
     {
-        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime');
+        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime', 'discount', 'tip', 'cashPart');
         $this->method = 'cash';
+        $this->discountType = 'amount';
+        $this->otherMethod = 'transfer';
         $this->service = 'togo';
         unset($this->editing);
     }
@@ -202,14 +257,26 @@ new #[Title('Vender')] class extends Component
             return ['ok' => false, 'error' => 'Falta elegir: '.implode(', ', $built['missing']).'.'];
         }
 
-        if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $built['total'] + $this->feeFor($this->service)) {
+        $base = $built['total'] + $this->feeFor($this->service);
+        $due = max(0, $base - $this->discountFor($base)) + $this->tipAmount();
+
+        if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $due) {
             return ['ok' => false, 'error' => 'El monto recibido no alcanza para el total.'];
+        }
+
+        if ($this->method === 'mixed') {
+            if (! is_numeric($this->cashPart) || (float) $this->cashPart <= 0 || (float) $this->cashPart >= $due) {
+                return ['ok' => false, 'error' => 'En pago mixto escribe cuánto se paga en efectivo (menos del total).'];
+            }
+            if (! in_array($this->otherMethod, ['transfer', 'card'], true)) {
+                return ['ok' => false, 'error' => 'Elige con qué se paga el resto.'];
+            }
         }
 
         $order = $this->store(OrderStatus::Paid, $built);
 
         $this->lastOrderId = $order->id;
-        $this->lastTotal = (float) $order->total;
+        $this->lastTotal = (float) $order->total + (float) $order->tip;
         $this->lastTitle = $this->title($order);
         $this->finish();
 
@@ -282,10 +349,10 @@ new #[Title('Vender')] class extends Component
         },
         // Renglones del pedido: viven en $wire.lines (se mandan al servidor solo al cobrar o guardar).
         list() { return Array.isArray($wire.lines) ? $wire.lines : Object.values($wire.lines ?? {}) },
-        isPlain(l) { return ! l.without?.length && ! l.extras?.length && ! l.choices?.length && ! (l.notes ?? '').trim() },
+        isPlain(l) { return ! l.courtesy && ! l.without?.length && ! l.extras?.length && ! l.choices?.length && ! (l.notes ?? '').trim() },
         same(a, b) {
             const s = x => [...(x ?? [])].map(Number).sort().join('.');
-            return a.product_id == b.product_id && s(a.without) === s(b.without) && s(a.extras) === s(b.extras) && s(a.choices) === s(b.choices) && (a.notes ?? '').trim().toLowerCase() === (b.notes ?? '').trim().toLowerCase();
+            return a.product_id == b.product_id && !! a.courtesy === !! b.courtesy && s(a.without) === s(b.without) && s(a.extras) === s(b.extras) && s(a.choices) === s(b.choices) && (a.notes ?? '').trim().toLowerCase() === (b.notes ?? '').trim().toLowerCase();
         },
         needsChoice(pid) { return (this.catalog[pid]?.options ?? []).some(g => g.required) },
         qtyOf(pid) { return this.list().filter(l => l.product_id == pid).reduce((n, l) => n + l.qty, 0) },
@@ -325,6 +392,7 @@ new #[Title('Vender')] class extends Component
             if (! lines.length) this.sheet = false;
         },
         unit(l) {
+            if (l.courtesy) return 0;
             const p = this.catalog[l.product_id];
             const choicePrice = (l.choices ?? []).reduce((t, id) => t + (p?.options.flatMap(g => g.choices).find(c => c.id == id)?.price ?? 0), 0);
             return (p?.price ?? 0) + choicePrice + (l.extras ?? []).reduce((t, id) => t + (p?.extras.find(e => e.id == id)?.price ?? 0), 0);
@@ -336,26 +404,37 @@ new #[Title('Vender')] class extends Component
                 without: (l.without ?? []).map(id => 'Sin ' + (p?.without.find(w => w.id == id)?.name ?? '').toLowerCase()),
                 extras: (l.extras ?? []).map(id => p?.extras.find(e => e.id == id)?.name).filter(Boolean),
                 notes: (l.notes ?? '').trim(),
+                courtesy: !! l.courtesy,
             };
         },
         count() { return this.list().reduce((n, l) => n + l.qty, 0) },
         packaging() { return $wire.service === 'togo' ? this.fee : 0 },
-        total() { return Math.round((this.list().reduce((t, l) => t + this.unit(l) * l.qty, 0) + (this.count() ? this.packaging() : 0)) * 100) / 100 },
+        r2(n) { return Math.round(n * 100) / 100 },
+        subtotal() { return this.r2(this.list().reduce((t, l) => t + this.unit(l) * l.qty, 0) + (this.count() ? this.packaging() : 0)) },
+        discountAmt() {
+            const v = Math.max(0, Number($wire.discount) || 0), base = this.subtotal();
+            return this.r2(Math.min(base, $wire.discountType === 'percent' ? base * Math.min(100, v) / 100 : v));
+        },
+        total() { return this.r2(Math.max(0, this.subtotal() - this.discountAmt())) },
+        tipAmt() { return this.r2(Math.max(0, Number($wire.tip) || 0)) },
+        due() { return this.r2(this.total() + this.tipAmt()) },
+        setTip(pct) { $wire.tip = pct === null ? null : String(this.r2(this.total() * pct / 100)) },
         change() {
             const r = $wire.received;
             if ($wire.method !== 'cash' || r === null || r === '' || isNaN(r)) return null;
-            return Math.round((Number(r) - this.total()) * 100) / 100;
+            return this.r2(Number(r) - this.due());
         },
-        quick() { return [50, 100, 200, 500, 1000].filter(b => b > this.total()).slice(0, 3) },
+        quick() { return [50, 100, 200, 500, 1000].filter(b => b > this.due()).slice(0, 3) },
+        rest() { return this.r2(Math.max(0, this.due() - (Number($wire.cashPart) || 0))) },
         // Editor de indicaciones de un renglón
         edit(i) {
             const l = this.list()[i];
             const picked = {};
             (this.catalog[l.product_id]?.options ?? []).forEach(g => { const c = g.choices.find(c => (l.choices ?? []).some(x => x == c.id)); if (c) picked[g.id] = c.id });
-            this.editor = { index: i, isNew: false, max: l.qty, count: l.qty, product_id: l.product_id, without: [...(l.without ?? [])], extras: [...(l.extras ?? [])], choices: picked, notes: l.notes ?? '', error: '' };
+            this.editor = { index: i, isNew: false, max: l.qty, count: l.qty, product_id: l.product_id, without: [...(l.without ?? [])], extras: [...(l.extras ?? [])], choices: picked, notes: l.notes ?? '', courtesy: !! l.courtesy, error: '' };
         },
         editNew(pid) {
-            this.editor = { index: null, isNew: true, max: 99, count: 1, product_id: pid, without: [], extras: [], choices: {}, notes: '', error: '' };
+            this.editor = { index: null, isNew: true, max: 99, count: 1, product_id: pid, without: [], extras: [], choices: {}, notes: '', courtesy: false, error: '' };
         },
         pick(group, choiceId) {
             const current = this.editor.choices[group.id];
@@ -372,7 +451,7 @@ new #[Title('Vender')] class extends Component
             const missing = (this.catalog[e.product_id]?.options ?? []).filter(g => g.required && ! e.choices[g.id]);
             if (missing.length) return e.error = 'Elige ' + missing.map(g => g.name.toLowerCase()).join(' y ') + '.';
             const lines = this.list().map(l => ({ ...l }));
-            const edited = { product_id: e.product_id, qty: e.count, without: e.without, extras: e.extras, choices: Object.values(e.choices).filter(Boolean), notes: e.notes.trim() };
+            const edited = { product_id: e.product_id, qty: e.count, without: e.without, extras: e.extras, choices: Object.values(e.choices).filter(Boolean), notes: e.notes.trim(), courtesy: !! e.courtesy };
             let at = lines.length;
             if (! e.isNew) {
                 const original = lines[e.index];
@@ -568,29 +647,70 @@ new #[Title('Vender')] class extends Component
                     @include('partials.order-lines')
                 </div>
 
-                <p x-show="packaging() > 0" x-cloak class="-mt-2 flex justify-between border-t border-line pt-2.5 text-[15px]">
-                    <span class="text-muted">Empaque para llevar</span>
-                    <span class="num text-lg font-semibold" x-text="fmt(packaging())"></span>
-                </p>
+                {{-- Desglose --}}
+                <div class="space-y-1.5 rounded-2xl bg-sunken px-4 py-3 text-[15px]">
+                    <div class="flex justify-between" x-show="packaging() > 0 || discountAmt() > 0" x-cloak>
+                        <span class="text-muted" x-text="count() === 1 ? '1 producto' : count() + ' productos'"></span>
+                        <span class="num text-lg font-semibold" x-text="fmt(subtotal() - (count() ? packaging() : 0))"></span>
+                    </div>
+                    <div class="flex justify-between" x-show="packaging() > 0" x-cloak>
+                        <span class="text-muted">Empaque para llevar</span>
+                        <span class="num text-lg font-semibold" x-text="fmt(packaging())"></span>
+                    </div>
+                    <div class="flex justify-between text-salsa" x-show="discountAmt() > 0" x-cloak>
+                        <span>Descuento</span>
+                        <span class="num text-lg font-semibold" x-text="'−' + fmt(discountAmt())"></span>
+                    </div>
+                    <div class="flex items-end justify-between pt-1" :class="(packaging() > 0 || discountAmt() > 0) && 'border-t border-line'">
+                        <span class="pb-1 text-sm font-semibold text-muted" x-text="(packaging() > 0 || discountAmt() > 0) ? 'Total' : (count() === 1 ? '1 producto' : count() + ' productos')"></span>
+                        <span class="num text-[2.75rem] leading-none font-bold" x-text="fmt(total())"></span>
+                    </div>
+                </div>
 
-                <div class="flex items-end justify-between rounded-2xl bg-sunken px-4 py-3">
-                    <span class="text-sm font-semibold text-muted" x-text="count() === 1 ? '1 producto' : count() + ' productos'"></span>
-                    <span class="num text-[2.75rem] leading-none font-bold" x-text="fmt(total())"></span>
+                {{-- Descuento --}}
+                <div x-data="{ open: !! $wire.discount }">
+                    <button type="button" x-show="! open" @click="open = true; $nextTick(() => $refs.disc.focus())" class="btn-quiet -ml-2.5"><x-icon name="plus" class="size-4" /> Descuento</button>
+                    <div x-show="open" x-cloak>
+                        <p class="label">Descuento</p>
+                        <div class="flex gap-2">
+                            <input x-ref="disc" type="number" inputmode="decimal" min="0" step="0.01" x-model="$wire.discount" class="input num flex-1 text-xl font-semibold" placeholder="0">
+                            <div class="segmented w-28 shrink-0" role="group" aria-label="Tipo de descuento">
+                                <button type="button" @click="$wire.discountType = 'amount'" :aria-pressed="$wire.discountType === 'amount'">$</button>
+                                <button type="button" @click="$wire.discountType = 'percent'" :aria-pressed="$wire.discountType === 'percent'">%</button>
+                            </div>
+                            <button type="button" @click="$wire.discount = null; open = false" class="btn-quiet size-12 justify-center !px-0" aria-label="Quitar descuento"><x-icon name="x" class="size-4" /></button>
+                        </div>
+                    </div>
                 </div>
 
                 <div>
                     <p class="label">Forma de pago</p>
                     <div class="segmented" role="group" aria-label="Forma de pago">
-                        @foreach (PaymentMethod::cases() as $m)
-                            <button type="button" @click="$wire.method = '{{ $m->value }}'" :aria-pressed="$wire.method === '{{ $m->value }}'">{{ $m->label() }}</button>
-                        @endforeach
+                        <button type="button" @click="$wire.method = 'cash'" :aria-pressed="$wire.method === 'cash'">Efectivo</button>
+                        <button type="button" @click="$wire.method = 'transfer'" :aria-pressed="$wire.method === 'transfer'">Transf.</button>
+                        <button type="button" @click="$wire.method = 'card'" :aria-pressed="$wire.method === 'card'">Tarjeta</button>
+                        <button type="button" @click="$wire.method = 'mixed'" :aria-pressed="$wire.method === 'mixed'">Mixto</button>
+                    </div>
+                </div>
+
+                {{-- Propina --}}
+                <div>
+                    <p class="label">Propina <span class="font-normal text-muted">(no cuenta como venta)</span></p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" class="chip" :aria-pressed="tipAmt() === 0" @click="setTip(null)">Sin propina</button>
+                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2(total() * 0.10)" @click="setTip(10)">10%</button>
+                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2(total() * 0.15)" @click="setTip(15)">15%</button>
+                        <div class="relative w-28">
+                            <span class="num pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 font-semibold text-muted">$</span>
+                            <input type="number" inputmode="decimal" min="0" step="0.5" x-model="$wire.tip" class="input num !min-h-9 !py-1 !pl-7 text-base font-semibold" placeholder="Otra" aria-label="Otra propina">
+                        </div>
                     </div>
                 </div>
 
                 <div x-show="$wire.method === 'cash'" class="space-y-2.5">
                     <p class="label !mb-0">Recibido</p>
                     <div class="flex flex-wrap gap-2">
-                        <button type="button" class="chip" :aria-pressed="$wire.received !== null && Number($wire.received) === total()" @click="$wire.received = String(total())">Exacto</button>
+                        <button type="button" class="chip" :aria-pressed="$wire.received !== null && Number($wire.received) === due()" @click="$wire.received = String(due())">Exacto</button>
                         <template x-for="amount in quick()" :key="amount">
                             <button type="button" class="chip num !text-base" :aria-pressed="Number($wire.received) === amount" @click="$wire.received = String(amount)" x-text="'$' + amount"></button>
                         </template>
@@ -601,6 +721,26 @@ new #[Title('Vender')] class extends Component
                         <span class="text-sm font-bold" x-text="change() >= 0 ? 'Cambio' : 'Faltan'"></span>
                         <span class="num text-[2.5rem] leading-none font-bold" x-text="fmt(Math.abs(change() ?? 0))"></span>
                     </div>
+                </div>
+
+                <div x-show="$wire.method === 'mixed'" x-cloak class="space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="label" for="cash-part">En efectivo</label>
+                            <x-money-input id="cash-part" x-model="$wire.cashPart" placeholder="0" />
+                        </div>
+                        <div>
+                            <p class="label">El resto con</p>
+                            <div class="segmented" role="group" aria-label="Resto con">
+                                <button type="button" @click="$wire.otherMethod = 'transfer'" :aria-pressed="$wire.otherMethod === 'transfer'">Transf.</button>
+                                <button type="button" @click="$wire.otherMethod = 'card'" :aria-pressed="$wire.otherMethod === 'card'">Tarjeta</button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="flex justify-between rounded-xl bg-sunken px-4 py-2.5 text-[15px]">
+                        <span class="text-muted" x-text="($wire.otherMethod === 'card' ? 'Con tarjeta' : 'Por transferencia')"></span>
+                        <span class="num text-xl font-bold" x-text="fmt(rest())"></span>
+                    </p>
                 </div>
 
                 <div x-show="$wire.method !== 'cash'" x-cloak>
@@ -617,8 +757,8 @@ new #[Title('Vender')] class extends Component
                 <div class="grid grid-cols-[auto_1fr] gap-2">
                     <button type="button" @click="submit('saveOpen')" class="btn btn-lg !px-4" :disabled="busy || count() === 0">Guardar sin cobrar</button>
                     <button type="button" @click="submit('charge')" class="btn-primary btn-lg touch-manipulation"
-                            :disabled="busy || count() === 0 || (change() !== null && change() < 0)">
-                        <span x-show="!busy">Cobrar <span class="num text-xl" x-text="fmt(total())"></span></span>
+                            :disabled="busy || count() === 0 || (change() !== null && change() < 0) || ($wire.method === 'mixed' && ! (Number($wire.cashPart) > 0 && Number($wire.cashPart) < due()))">
+                        <span x-show="!busy">Cobrar <span class="num text-xl" x-text="fmt(due())"></span></span>
                         <span x-show="busy" x-cloak>Guardando...</span>
                     </button>
                 </div>
@@ -683,6 +823,14 @@ new #[Title('Vender')] class extends Component
                         <label class="label" for="line-notes">Nota</label>
                         <input id="line-notes" type="text" x-model="editor.notes" maxlength="120" class="input" placeholder="Ej. bien dorada, salsa aparte" @keydown.enter.prevent="saveEdit()">
                     </div>
+
+                    <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
+                        <span>
+                            <span class="block font-semibold">Cortesía</span>
+                            <span class="block text-sm text-muted">Va gratis. Su costo sí cuenta en la ganancia.</span>
+                        </span>
+                        <input type="checkbox" x-model="editor.courtesy" class="switch">
+                    </label>
 
                     <p x-show="editor.error" x-text="editor.error" class="flex items-center gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile"></p>
 

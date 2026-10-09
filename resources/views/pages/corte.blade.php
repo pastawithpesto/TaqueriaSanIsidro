@@ -2,6 +2,8 @@
 
 use App\Enums\OrderStatus;
 use App\Models\CashClose;
+use App\Models\CashMovement;
+use App\Models\OrderPayment;
 use App\Models\Expense;
 use App\Models\Order;
 use Carbon\CarbonImmutable;
@@ -25,6 +27,18 @@ new #[Title('Corte de caja')] class extends Component
     public float $otherSales = 0;
 
     public float $cashExpenses = 0;
+
+    /** Entradas menos retiros de efectivo del día. */
+    public float $movementsNet = 0;
+
+    public float $tips = 0;
+
+    /** Formulario de movimiento de caja. */
+    public string $moveType = 'out';
+
+    public ?string $moveAmount = null;
+
+    public ?string $moveReason = null;
 
     public function mount(): void
     {
@@ -95,17 +109,62 @@ new #[Title('Corte de caja')] class extends Component
     protected function loadTotals(): void
     {
         $day = $this->day();
-        $paid = Order::where('status', OrderStatus::Paid)->whereBetween('sold_at', [$day, $day->endOfDay()]);
+        $range = [$day, $day->endOfDay()];
 
-        $this->cashSales = (float) (clone $paid)->where('payment_method', 'cash')->sum('total');
-        $this->otherSales = (float) (clone $paid)->where('payment_method', '!=', 'cash')->sum('total');
+        // Pagos de órdenes pagadas, por el día en que se cobraron.
+        $payments = OrderPayment::whereBetween('created_at', $range)
+            ->whereHas('order', fn ($q) => $q->where('status', OrderStatus::Paid));
+
+        $this->cashSales = (float) (clone $payments)->where('method', 'cash')->sum('amount');
+        $this->otherSales = (float) (clone $payments)->where('method', '!=', 'cash')->sum('amount');
+        $this->tips = (float) Order::where('status', OrderStatus::Paid)->whereBetween('paid_at', $range)->sum('tip');
         $this->cashExpenses = (float) Expense::whereDate('spent_on', $day)->where('from_cash', true)->sum('total');
+        $this->movementsNet = (float) CashMovement::whereBetween('moved_at', $range)->get()->sum(fn ($m) => $m->signed());
+    }
+
+    #[Computed]
+    public function movements()
+    {
+        $day = $this->day();
+
+        return CashMovement::whereBetween('moved_at', [$day, $day->endOfDay()])->orderBy('moved_at')->get();
+    }
+
+    public function addMovement(): void
+    {
+        $this->validate([
+            'moveType' => ['required', 'in:in,out'],
+            'moveAmount' => ['required', 'numeric', 'gt:0'],
+            'moveReason' => ['nullable', 'string', 'max:120'],
+        ], attributes: ['moveAmount' => 'monto', 'moveReason' => 'motivo']);
+
+        $day = $this->day();
+        CashMovement::create([
+            'user_id' => auth()->id(),
+            'type' => $this->moveType,
+            'amount' => $this->moveAmount,
+            'reason' => $this->moveReason ?: null,
+            'moved_at' => $day->isToday() ? now() : $day->setTime(23, 59),
+        ]);
+
+        $this->reset('moveAmount', 'moveReason');
+        $this->loadTotals();
+        unset($this->movements);
+        $this->dispatch('toast', message: 'Movimiento registrado');
+        $this->dispatch('movement-saved');
+    }
+
+    public function deleteMovement(int $id): void
+    {
+        CashMovement::whereKey($id)->delete();
+        $this->loadTotals();
+        unset($this->movements);
     }
 
     #[Computed]
     public function expected(): float
     {
-        return round((is_numeric($this->opening) ? (float) $this->opening : 0) + $this->cashSales - $this->cashExpenses, 2);
+        return round((is_numeric($this->opening) ? (float) $this->opening : 0) + $this->cashSales + $this->movementsNet - $this->cashExpenses, 2);
     }
 
     #[Computed]
@@ -146,7 +205,8 @@ new #[Title('Corte de caja')] class extends Component
 ?>
 
 <div x-data="{
-        get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales - $wire.cashExpenses) * 100) / 100 },
+        get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales + $wire.movementsNet - $wire.cashExpenses) * 100) / 100 },
+        moveOpen: false,
         get diff() {
             if ($wire.counted === null || $wire.counted === '' || isNaN($wire.counted)) return null;
             return Math.round((Number($wire.counted) - this.expected) * 100) / 100;
@@ -172,13 +232,19 @@ new #[Title('Corte de caja')] class extends Component
                     <dd class="w-36"><x-money-input id="opening" wire:model="opening" class="!min-h-11 text-right !text-lg" /></dd>
                 </div>
                 <div class="flex items-center justify-between px-4 py-3">
-                    <dt class="text-muted">Ventas en efectivo</dt>
+                    <dt class="text-muted">Cobrado en efectivo @if ($tips > 0)<span class="block text-xs">incluye propinas</span>@endif</dt>
                     <dd class="num text-xl font-bold" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ $cashSales > 0 ? '+' : '' }}{{ money($cashSales) }}</dd>
                 </div>
                 <div class="flex items-center justify-between px-4 py-3">
                     <dt class="text-muted">Gastos pagados de la caja</dt>
                     <dd class="num text-xl font-bold" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ $cashExpenses > 0 ? '−'.money($cashExpenses) : money(0) }}</dd>
                 </div>
+                @if ($movementsNet != 0)
+                    <div class="flex items-center justify-between px-4 py-3">
+                        <dt class="text-muted">Entradas y retiros</dt>
+                        <dd class="num text-xl font-bold">{{ $movementsNet > 0 ? '+' : '−' }}{{ money(abs($movementsNet)) }}</dd>
+                    </div>
+                @endif
                 <div class="flex items-end justify-between bg-sunken/60 px-4 py-4">
                     <dt class="font-semibold">Debe haber en caja</dt>
                     <dd class="num text-[2.5rem] leading-none font-bold" x-text="fmt(expected)" wire:loading.class="animate-pulse opacity-40" wire:target="date">{{ money($this->expected) }}</dd>
@@ -202,6 +268,68 @@ new #[Title('Corte de caja')] class extends Component
                 <span>Además se cobraron {{ money($otherSales) }} por transferencia o tarjeta. Ese dinero no entra a la caja.</span>
             </p>
         @endif
+
+        @if ($tips > 0)
+            <p class="flex gap-2 px-1 text-sm text-muted">
+                <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
+                <span>Propinas del día: <span class="font-semibold text-ink">{{ money($tips) }}</span>. No cuentan como venta.</span>
+            </p>
+        @endif
+
+        {{-- Movimientos de caja --}}
+        <section class="space-y-2">
+            <div class="flex items-center justify-between px-1">
+                <h2 class="section-title">Movimientos de caja</h2>
+                <div class="flex gap-2">
+                    <button type="button" class="btn !min-h-9 !px-3" @click="$wire.moveType = 'out'; moveOpen = true">Sacar</button>
+                    <button type="button" class="btn !min-h-9 !px-3" @click="$wire.moveType = 'in'; moveOpen = true">Meter</button>
+                </div>
+            </div>
+            @if ($this->movements->isEmpty())
+                <p class="px-1 text-sm text-muted">Si sacas efectivo de la caja (para pagar algo personal, depositar) o metes cambio, anótalo aquí para que el corte cuadre.</p>
+            @else
+                <ul class="list">
+                    @foreach ($this->movements as $m)
+                        <li wire:key="mv-{{ $m->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
+                            <span @class(['grid size-9 shrink-0 place-items-center rounded-xl', 'bg-salsa-soft text-salsa' => $m->type === 'in', 'bg-chile-soft text-chile' => $m->type === 'out'])>
+                                <x-icon :name="$m->type === 'in' ? 'plus' : 'minus'" class="size-4" />
+                            </span>
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate font-semibold">{{ $m->reason ?: ($m->type === 'in' ? 'Entrada de efectivo' : 'Retiro de efectivo') }}</span>
+                                <span class="block text-sm text-muted">{{ $m->moved_at->format('g:i a') }}</span>
+                            </span>
+                            <span class="num text-xl font-bold">{{ $m->type === 'in' ? '+' : '−' }}{{ money($m->amount) }}</span>
+                            <button type="button" class="btn-quiet size-10 justify-center !px-0" aria-label="Borrar movimiento"
+                                    @click="if (await $store.confirm.ask({ title: '¿Borrar este movimiento?', message: @js(($m->reason ?: 'Movimiento').' por '.money($m->amount)), action: 'Borrar' })) $wire.deleteMovement({{ $m->id }})">
+                                <x-icon name="trash" class="size-4" />
+                            </button>
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
+        </section>
+
+        <div wire:ignore>
+            <x-sheet title="Movimiento de caja" open="moveOpen" x-text="$wire.moveType === 'out' ? 'Sacar efectivo' : 'Meter efectivo'" @movement-saved.window="moveOpen = false">
+                <form @submit.prevent="$wire.addMovement()" id="move-form" class="space-y-4">
+                    <div class="segmented" role="group" aria-label="Tipo de movimiento">
+                        <button type="button" @click="$wire.moveType = 'out'" :aria-pressed="$wire.moveType === 'out'">Sacar</button>
+                        <button type="button" @click="$wire.moveType = 'in'" :aria-pressed="$wire.moveType === 'in'">Meter</button>
+                    </div>
+                    <div>
+                        <label class="label" for="move-amount">Monto</label>
+                        <x-money-input id="move-amount" x-model="$wire.moveAmount" placeholder="0" class="!min-h-14 !text-2xl" />
+                    </div>
+                    <div>
+                        <label class="label" for="move-reason">Motivo <span class="font-normal text-muted">(opcional)</span></label>
+                        <input id="move-reason" type="text" x-model="$wire.moveReason" maxlength="120" class="input" placeholder="Ej. depósito al banco, cambio para la caja">
+                    </div>
+                </form>
+                <x-slot:footer>
+                    <button type="submit" form="move-form" class="btn-primary btn-lg w-full" :disabled="! (Number($wire.moveAmount) > 0)">Guardar movimiento</button>
+                </x-slot:footer>
+            </x-sheet>
+        </div>
 
         <section class="card space-y-4 !p-5">
             <div>

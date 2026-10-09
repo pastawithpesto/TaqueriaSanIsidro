@@ -71,6 +71,12 @@ new #[Title('Resumen')] class extends Component
         $recipeCost = (float) $this->paidItems($this->from, $this->to)->sum(DB::raw('order_items.quantity * order_items.unit_cost'));
         $expenses = (float) Expense::whereDate('spent_on', '>=', $this->from)->whereDate('spent_on', '<=', $this->to)->sum('total');
 
+        $paidOrders = $this->paidOrders($this->from, $this->to);
+        $tips = (float) (clone $paidOrders)->sum('tip');
+        $discounts = (float) (clone $paidOrders)->sum('discount')
+            + (float) $this->paidItems($this->from, $this->to)->where('order_items.modifiers', 'like', '%courtesy%')->get(['order_items.modifiers', 'order_items.quantity'])
+                ->sum(fn ($i) => (float) (collect(json_decode($i->modifiers, true))->firstWhere('type', 'courtesy')['value'] ?? 0) * $i->quantity);
+
         [$pFrom, $pTo] = $this->previous();
         $prevSales = (float) $this->paidOrders($pFrom, $pTo)->sum('total');
 
@@ -84,6 +90,8 @@ new #[Title('Resumen')] class extends Component
             'margin' => $sales > 0 ? ($sales - $recipeCost) / $sales * 100 : null,
             'cash' => $sales - $expenses,
             'delta' => $prevSales > 0 ? ($sales - $prevSales) / $prevSales * 100 : null,
+            'tips' => $tips,
+            'discounts' => $discounts,
         ];
     }
 
@@ -271,6 +279,12 @@ new #[Title('Resumen')] class extends Component
                     <dd @class(['num text-[1.75rem] leading-none font-bold', 'text-chile' => $t['cash'] < 0])>{{ money(round($t['cash'])) }}</dd>
                 </div>
             </dl>
+            @if ($t['tips'] > 0 || $t['discounts'] > 0)
+                <div class="flex flex-wrap gap-x-6 gap-y-1 border-t border-line px-5 py-3 text-sm text-muted">
+                    @if ($t['discounts'] > 0) <span>Descuentos y cortesías <span class="num text-base font-bold text-ink">{{ money(round($t['discounts'])) }}</span></span> @endif
+                    @if ($t['tips'] > 0) <span>Propinas, aparte de las ventas <span class="num text-base font-bold text-ink">{{ money(round($t['tips'])) }}</span></span> @endif
+                </div>
+            @endif
             <details class="group border-t border-line px-5 py-3 text-sm">
                 <summary class="flex cursor-pointer list-none items-center gap-1.5 font-semibold text-muted [&::-webkit-details-marker]:hidden">
                     <x-icon name="info" class="size-4" /> ¿Por qué son distintas?

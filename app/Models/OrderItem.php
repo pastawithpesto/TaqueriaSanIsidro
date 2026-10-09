@@ -29,6 +29,18 @@ class OrderItem extends Model
         return $this->belongsTo(Product::class);
     }
 
+    /** Pieza regalada: no se cobra, pero su costo sí cuenta. */
+    public function isCourtesy(): bool
+    {
+        return collect($this->modifiers ?? [])->contains('type', 'courtesy');
+    }
+
+    /** Lo que habría costado la pieza si se cobrara. */
+    public function courtesyValue(): float
+    {
+        return (float) (collect($this->modifiers ?? [])->firstWhere('type', 'courtesy')['value'] ?? 0) * $this->quantity;
+    }
+
     /** "Sin cebolla", "Sin jitomate". */
     public function withoutNames(): array
     {

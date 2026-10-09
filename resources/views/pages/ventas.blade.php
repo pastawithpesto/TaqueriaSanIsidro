@@ -43,7 +43,7 @@ new #[Title('Ventas')] class extends Component
     {
         $day = $this->day();
 
-        return Order::with('items')
+        return Order::with(['items', 'payments'])
             ->whereBetween('sold_at', [$day, $day->endOfDay()])
             ->orderBy('sold_at')
             ->get()
@@ -78,10 +78,15 @@ new #[Title('Ventas')] class extends Component
 @php
     $paid = $this->paid;
     $total = (float) $paid->sum('total');
-    $byMethod = collect(PaymentMethod::cases())->map(fn ($m) => [
+    // Por forma de pago (un pago mixto cuenta en las dos). Incluye propinas.
+    $payments = $paid->flatMap->payments;
+    $byMethod = collect(PaymentMethod::simple())->map(fn ($m) => [
         'method' => $m,
-        'total' => (float) $paid->where('payment_method', $m)->sum('total'),
+        'total' => (float) $payments->where('method', $m)->sum('amount'),
     ])->filter(fn ($m) => $m['total'] > 0);
+    $collected = (float) $payments->sum('amount');
+    $tips = (float) $paid->sum('tip');
+    $discounts = (float) $paid->sum('discount') + $paid->flatMap->items->sum(fn ($i) => $i->courtesyValue());
     $cancelled = $this->orders->where('status', OrderStatus::Cancelled)->count();
     $openCount = $this->orders->where('status', OrderStatus::Open)->count();
     $isToday = $this->dayLabel === 'Hoy';
@@ -118,7 +123,7 @@ new #[Title('Ventas')] class extends Component
                 @if ($total > 0)
                     <div class="mt-4 flex h-2 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
                         @foreach ($byMethod as $row)
-                            <span class="h-full {{ $color($row['method']) }}" style="width: {{ $row['total'] / $total * 100 }}%"></span>
+                            <span class="h-full {{ $color($row['method']) }}" style="width: {{ $collected > 0 ? $row['total'] / $collected * 100 : 0 }}%"></span>
                         @endforeach
                     </div>
                     <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
@@ -130,6 +135,12 @@ new #[Title('Ventas')] class extends Component
                             </div>
                         @endforeach
                     </dl>
+                @endif
+                @if ($tips > 0 || $discounts > 0)
+                    <p class="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-line pt-3 text-sm text-muted">
+                        @if ($tips > 0) <span>Propinas <span class="num text-base font-bold text-ink">{{ money($tips) }}</span></span> @endif
+                        @if ($discounts > 0) <span>Descuentos y cortesías <span class="num text-base font-bold text-ink">{{ money($discounts) }}</span></span> @endif
+                    </p>
                 @endif
             </section>
 
@@ -182,6 +193,7 @@ new #[Title('Ventas')] class extends Component
                                                 <span class="num font-bold">{{ $item->quantity }}</span> × {{ $item->product_name }} <span class="text-muted">a {{ money($item->unit_price) }}</span>
                                                 @if ($item->modifiers || $item->notes)
                                                     <span class="mt-0.5 flex flex-wrap gap-1">
+                                                        @if ($item->isCourtesy()) <span class="badge bg-ink text-bg">Cortesía</span> @endif
                                                         @foreach ($item->choices() as $choice) <span class="badge bg-limon-soft text-ink">{{ $choice['name'] }}</span> @endforeach
                                                         @foreach ($item->withoutNames() as $name) <span class="badge bg-chile-soft text-chile">Sin {{ mb_strtolower($name) }}</span> @endforeach
                                                         @foreach ($item->extras() as $extra) <span class="badge bg-salsa-soft text-salsa">+ {{ $extra['name'] }}</span> @endforeach
@@ -193,6 +205,18 @@ new #[Title('Ventas')] class extends Component
                                         </li>
                                     @endforeach
                                 </ul>
+                                @if ((float) $order->packaging_fee > 0 || (float) $order->discount > 0 || (float) $order->tip > 0 || $order->payments->count() > 1)
+                                    <div class="space-y-1 border-t border-line pt-2 text-muted">
+                                        @if ((float) $order->packaging_fee > 0) <p class="flex justify-between">Empaque <span class="num text-base font-semibold text-ink">{{ money($order->packaging_fee) }}</span></p> @endif
+                                        @if ((float) $order->discount > 0) <p class="flex justify-between">Descuento <span class="num text-base font-semibold text-salsa">−{{ money($order->discount) }}</span></p> @endif
+                                        @if ((float) $order->tip > 0) <p class="flex justify-between">Propina <span class="num text-base font-semibold text-ink">{{ money($order->tip) }}</span></p> @endif
+                                        @if ($order->payments->count() > 1)
+                                            @foreach ($order->payments as $pay)
+                                                <p class="flex justify-between">Pagó con {{ mb_strtolower($pay->method->label()) }} <span class="num text-base font-semibold text-ink">{{ money($pay->amount) }}</span></p>
+                                            @endforeach
+                                        @endif
+                                    </div>
+                                @endif
                                 @if ($cost > 0 && ! $isCancelled)
                                     <p class="flex justify-between border-t border-line pt-2 text-muted">Ganancia por receta <span class="num text-base font-bold text-salsa">{{ money((float) $order->total - $cost) }}</span></p>
                                 @endif

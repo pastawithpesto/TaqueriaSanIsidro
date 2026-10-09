@@ -115,7 +115,8 @@ class OrderFlowTest extends TestCase
     public function test_open_orders_do_not_count_as_sales(): void
     {
         Order::create(['daily_number' => 1, 'status' => OrderStatus::Open, 'label' => 'Juan', 'total' => 80, 'sold_at' => now()]);
-        Order::create(['daily_number' => 2, 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 40, 'sold_at' => now()]);
+        Order::create(['daily_number' => 2, 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 40, 'sold_at' => now(), 'paid_at' => now()])
+            ->payments()->create(['method' => 'cash', 'amount' => 40]);
 
         $totals = Livewire::test('pages::resumen')->set('range', 'today')->get('totals');
         $this->assertEquals(40, $totals['sales']);

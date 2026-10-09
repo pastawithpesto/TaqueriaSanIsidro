@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'delivered_at'])]
+#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'delivered_at'])]
 class Order extends Model
 {
     protected function casts(): array
@@ -21,6 +21,8 @@ class Order extends Model
             'payment_method' => PaymentMethod::class,
             'total' => 'decimal:2',
             'packaging_fee' => 'decimal:2',
+            'discount' => 'decimal:2',
+            'tip' => 'decimal:2',
             'sold_at' => 'datetime',
             'pickup_at' => 'datetime',
             'ready_at' => 'datetime',
@@ -32,6 +34,11 @@ class Order extends Model
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(OrderPayment::class);
     }
 
     public function user(): BelongsTo

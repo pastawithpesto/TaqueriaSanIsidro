@@ -7,6 +7,7 @@
                 <span class="min-w-0 flex-1">
                     <span class="block text-[15px] font-semibold" x-text="catalog[line.product_id]?.name"></span>
                     <span class="mt-0.5 flex flex-wrap gap-1">
+                        <span x-show="mods(line).courtesy" class="badge bg-ink text-bg">Cortesía</span>
                         <template x-for="c in mods(line).choices" :key="c">
                             <span class="badge bg-limon text-on-limon" x-text="c"></span>
                         </template>
@@ -19,7 +20,7 @@
                         <span x-show="mods(line).notes" class="text-sm text-muted italic" x-text="mods(line).notes"></span>
                     </span>
                 </span>
-                <span class="num shrink-0 text-lg font-semibold" x-text="fmt(unit(line) * line.qty)"></span>
+                <span class="num shrink-0 text-lg font-semibold" x-text="line.courtesy ? 'Gratis' : fmt(unit(line) * line.qty)"></span>
                 <x-icon name="pencil" class="mt-1 size-3.5 shrink-0 text-muted" />
             </button>
         </li>

@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Enums\OrderStatus;
 use App\Models\CashClose;
+use App\Models\CashMovement;
 use App\Models\Expense;
 use App\Models\Order;
 use App\Models\User;
@@ -20,9 +20,10 @@ class CashCloseTest extends TestCase
         parent::setUp();
         $this->actingAs(User::factory()->create());
 
-        Order::create(['status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 500, 'sold_at' => now()]);
-        Order::create(['status' => OrderStatus::Paid, 'payment_method' => 'transfer', 'total' => 300, 'sold_at' => now()]);
-        Order::create(['status' => OrderStatus::Cancelled, 'payment_method' => 'cash', 'total' => 999, 'sold_at' => now()]);
+        foreach ([['paid', 'cash', 500], ['paid', 'transfer', 300], ['cancelled', 'cash', 999]] as [$status, $method, $total]) {
+            Order::create(['status' => $status, 'payment_method' => $method, 'total' => $total, 'sold_at' => now(), 'paid_at' => now()])
+                ->payments()->create(['method' => $method, 'amount' => $total]);
+        }
         Expense::create(['category' => 'gas', 'total' => 100, 'spent_on' => today(), 'from_cash' => true]);
         Expense::create(['category' => 'equipment', 'total' => 700, 'spent_on' => today(), 'from_cash' => false]);
     }
@@ -65,5 +66,18 @@ class CashCloseTest extends TestCase
         CashClose::create(['closed_on' => today()->subDay(), 'opening' => 0, 'expected' => 400, 'counted' => 450, 'difference' => 50]);
 
         Livewire::test('pages::corte')->assertSet('opening', '450');
+    }
+
+    public function test_cash_movements_change_the_expected_cash(): void
+    {
+        Livewire::test('pages::corte')
+            ->set('opening', '200')
+            ->set('moveType', 'out')->set('moveAmount', '150')->set('moveReason', 'Depósito')->call('addMovement')
+            ->set('moveType', 'in')->set('moveAmount', '50')->call('addMovement')
+            ->assertSet('movementsNet', -100.0)
+            ->assertSet('expected', 500.0); // 200 + 500 - 100 - 100 de gas
+
+        $id = CashMovement::where('type', 'out')->value('id');
+        Livewire::test('pages::corte')->call('deleteMovement', $id)->assertSet('movementsNet', 50.0);
     }
 }
