@@ -1,0 +1,55 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    volumes:
+      - .:/var/www/html
+    environment:
+      DB_HOST: db
+      RUN_MIGRATIONS: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: nginx:1.27-alpine
+    ports:
+      - "${APP_PORT:-8090}:80"
+    volumes:
+      - .:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "${FORWARD_DB_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-taqueria}
+      POSTGRES_USER: ${DB_USERNAME:-taqueria}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-taqueria} -d ${DB_DATABASE:-taqueria}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  node:
+    image: node:22-alpine
+    working_dir: /var/www/html
+    user: "${UID:-1000}:${GID:-1000}"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port ${VITE_PORT:-5174} --strictPort"
+    ports:
+      - "${VITE_PORT:-5174}:${VITE_PORT:-5174}"
+    volumes:
+      - .:/var/www/html
+
+volumes:
+  db-data:
