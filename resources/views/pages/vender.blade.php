@@ -713,7 +713,6 @@ new #[Title('Vender')] class extends Component
             @if ($this->editing)
                 <button type="button" wire:click="cancelEdit" class="btn">Salir</button>
             @else
-                <button type="button" x-show="count() > 0 && ! stock" x-cloak @click="confirmClear()" class="btn-quiet md:hidden">Vaciar</button>
                 <button type="button" @click="stock = ! stock" data-tour="agotados" class="btn" :class="stock && '!bg-ink !text-bg !border-ink'">
                     <x-icon name="eye-off" class="size-4" /> <span x-show="! stock">Agotados</span><span x-show="stock" x-cloak>Listo</span>
                 </button>
@@ -891,6 +890,8 @@ new #[Title('Vender')] class extends Component
                         <p class="text-sm text-muted">Toca uno para indicaciones</p>
                     </div>
                     @include('partials.order-lines')
+                    {{-- En el celular, Vaciar vive aquí: en el encabezado no cabe junto al título en pantallas angostas. --}}
+                    <button type="button" @click="confirmClear()" class="btn-quiet-danger -ml-2.5 mt-1 md:hidden"><x-icon name="trash" class="size-4" /> Vaciar pedido</button>
                 </div>
 
                 {{-- Desglose --}}
