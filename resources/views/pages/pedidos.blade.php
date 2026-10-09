@@ -104,10 +104,10 @@ new #[Title('Pedidos')] class extends Component
                                         <span @class(['badge', 'bg-naranja text-on-limon' => $order->isDelivery(), 'bg-sunken text-ink' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
                                     @endif
                                     @if ($order->dispatched_at && ! $delivered)
-                                        <span class="badge bg-sales text-white">En camino</span>
+                                        <span class="badge bg-naranja text-on-limon">En camino</span>
                                     @endif
                                     @if ($order->ready_at && ! $delivered)
-                                        <span class="badge bg-salsa text-white">Listo</span>
+                                        <span class="badge bg-salsa text-on-salsa">Listo</span>
                                     @endif
                                     @if ($delivered)
                                         <span class="badge bg-sunken text-muted">Ya entregado</span>
@@ -149,7 +149,7 @@ new #[Title('Pedidos')] class extends Component
                         <ul class="mt-3 flex-1 space-y-2 border-t border-line px-4 py-3">
                             @foreach ($order->items as $item)
                                 <li class="flex gap-3">
-                                    <span class="num w-7 shrink-0 text-2xl leading-none font-bold text-chile">{{ $item->quantity }}</span>
+                                    <span class="num w-7 shrink-0 text-2xl leading-none">{{ $item->quantity }}</span>
                                     <span class="min-w-0">
                                         <span class="block text-[17px] leading-tight font-semibold">{{ $item->product_name }}</span>
                                         @if ($item->modifiers || $item->notes)
@@ -161,7 +161,7 @@ new #[Title('Pedidos')] class extends Component
                                                     <span class="badge bg-chile text-white !text-[13px]">Sin {{ mb_strtolower($name) }}</span>
                                                 @endforeach
                                                 @foreach ($item->extras() as $extra)
-                                                    <span class="badge bg-salsa text-white !text-[13px]">+ {{ $extra['name'] }}</span>
+                                                    <span class="badge bg-salsa text-on-salsa !text-[13px]">+ {{ $extra['name'] }}</span>
                                                 @endforeach
                                                 @if ($item->notes)
                                                     <span class="text-sm text-ink italic">"{{ $item->notes }}"</span>
@@ -188,11 +188,11 @@ new #[Title('Pedidos')] class extends Component
                                 <a href="{{ route('vender', ['orden' => $order->id, 'cobrar' => 1]) }}" wire:navigate class="btn flex-1">Cobrar</a>
                             @endif
                             @if (! $delivered && $order->isDelivery() && ! $order->dispatched_at)
-                                <button type="button" wire:click="dispatchOrder({{ $order->id }})" class="btn-primary flex-1 !border-sales !bg-sales hover:!opacity-90">
+                                <button type="button" wire:click="dispatchOrder({{ $order->id }})" class="btn-primary flex-1 !border-naranja !bg-naranja !text-on-limon hover:!opacity-90">
                                     <x-icon name="right" class="size-4" /> Enviar
                                 </button>
                             @elseif (! $delivered)
-                                <button type="button" wire:click="deliver({{ $order->id }})" class="btn-primary flex-1 !bg-salsa !border-salsa hover:!opacity-90">
+                                <button type="button" wire:click="deliver({{ $order->id }})" class="btn-primary flex-1 !bg-salsa !border-salsa !text-on-salsa hover:!opacity-90">
                                     <x-icon name="check" class="size-4" /> Entregado
                                 </button>
                             @endif

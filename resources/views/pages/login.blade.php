@@ -55,7 +55,7 @@ new #[Layout('layouts::guest')] #[Title('Entrar')] class extends Component
 };
 ?>
 
-<form wire:submit="login" class="card space-y-4 !p-5">
+<form wire:submit="login" class="card space-y-4 !p-5 shadow-[0_24px_48px_-24px_rgb(51_32_15/0.5)]">
     <div>
         <label class="label" for="email">Correo</label>
         <input id="email" type="email" wire:model="email" class="input" autocomplete="username" autofocus>

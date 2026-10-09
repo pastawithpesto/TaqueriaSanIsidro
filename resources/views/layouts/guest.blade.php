@@ -14,11 +14,11 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="bg-brand min-h-dvh antialiased">
+<body class="bg-brand min-h-dvh antialiased dark:bg-bg">
     <main class="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5 py-10">
         <div class="mb-8 flex flex-col items-center gap-3 text-center">
             <x-logo class="size-32 shadow-xl ring-4 ring-white/80" :res="192" />
-            <h1 class="font-display text-4xl font-bold leading-[0.95] text-balance">{{ Branding::name() }}</h1>
+            <h1 class="font-display text-[2.5rem] leading-[0.95] text-balance">{{ Branding::name() }}</h1>
         </div>
         {{ $slot }}
     </main>

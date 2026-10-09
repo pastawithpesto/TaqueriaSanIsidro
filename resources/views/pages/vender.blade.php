@@ -747,32 +747,27 @@ new #[Title('Vender')] class extends Component
                     </x-slot:action>
                 </x-empty>
             @else
-                @php
-                    // Un tono de la paleta por categoría para reconocerlas de un vistazo.
-                    $tints = ['bg-tint-1', 'bg-tint-2', 'bg-tint-3', 'bg-tint-4', 'bg-tint-5'];
-                    $catIndex = $this->categories->flip();
-                @endphp
+                {{-- Tarjetas blancas y tranquilas; las que ya llevan piezas se pintan de amarillo. --}}
                 <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">
                     @foreach ($this->products as $product)
-                        @php $tint = $tints[($catIndex[$product->category] ?? 0) % count($tints)]; @endphp
                         <div wire:key="p-{{ $product->id }}" @if ($loop->first) data-tour="producto" @endif
                              x-show="category === '' || category === @js($product->category)"
-                             class="{{ $tint }} relative min-h-[8.25rem] rounded-2xl border-2 motion-safe:transition motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97]"
+                             class="relative min-h-[8.25rem] rounded-2xl border-2 motion-safe:transition motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97]"
                              :class="[
-                                 qtyOf({{ $product->id }}) > 0 ? 'border-chile shadow-[0_6px_16px_-8px_rgb(224_36_36/0.55)]' : 'border-transparent',
+                                 qtyOf({{ $product->id }}) > 0 ? 'border-limon bg-limon text-on-limon' : 'border-line bg-surface',
                                  catalog[{{ $product->id }}]?.soldOut && 'grayscale opacity-55',
                                  stock && 'ring-2 ring-ink/25 ring-offset-2 ring-offset-bg',
                              ]">
                             <button type="button" @click="tap({{ $product->id }})" class="add absolute inset-0 w-full touch-manipulation rounded-2xl" aria-label="Agregar {{ $product->name }}"></button>
                             <span x-show="catalog[{{ $product->id }}]?.soldOut" x-cloak class="pointer-events-none absolute top-2.5 right-2.5 z-10 rounded-md bg-ink px-2 py-0.5 text-xs font-bold text-bg">Agotado</span>
                             <div class="pointer-events-none relative flex h-full min-h-[8.25rem] flex-col justify-between gap-3 p-3.5">
-                                <p class="pr-10 font-display {{ mb_strlen($product->name) > 10 ? 'text-[1.25rem]' : 'text-[1.4rem]' }} leading-[0.95] font-bold hyphens-auto" lang="es">{{ $product->name }}</p>
-                                <span class="num inline-flex w-fit items-center rounded-lg bg-ink px-2.5 py-0.5 text-xl font-bold text-bg">{{ money($product->price) }}</span>
+                                <p class="pr-10 font-display {{ mb_strlen($product->name) > 12 ? 'text-[1.2rem]' : 'text-[1.35rem]' }} leading-[1.05] hyphens-auto" lang="es">{{ $product->name }}</p>
+                                <span class="num text-[1.75rem] leading-none">{{ money($product->price) }}</span>
                             </div>
                             <template x-if="qtyOf({{ $product->id }}) > 0">
                                 <div>
                                     <span id="q-{{ $product->id }}" x-text="qtyOf({{ $product->id }})"
-                                          class="num pointer-events-none absolute top-2.5 right-2.5 grid size-9 place-items-center rounded-full bg-chile text-xl font-bold text-white shadow-sm"></span>
+                                          class="num pointer-events-none absolute top-2.5 right-2.5 grid size-9 place-items-center rounded-full bg-chile text-xl text-white shadow-sm"></span>
                                     <button type="button" @click="removeOne({{ $product->id }})" class="btn-icon absolute right-2 bottom-2 touch-manipulation" aria-label="Quitar uno de {{ $product->name }}">
                                         <x-icon name="minus" />
                                     </button>
@@ -828,7 +823,7 @@ new #[Title('Vender')] class extends Component
              x-transition:leave="transition duration-200" x-transition:leave-end="opacity-0 translate-y-3"
              class="sheet-in fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex items-center gap-3 rounded-2xl bg-ink py-3 pr-3 pl-4 text-bg shadow-xl md:inset-x-auto md:right-6 md:bottom-6 md:w-96"
              role="status">
-            <span class="grid size-9 shrink-0 place-items-center rounded-full bg-salsa text-white"><x-icon name="check" class="size-5" /></span>
+            <span class="grid size-9 shrink-0 place-items-center rounded-full bg-salsa text-on-salsa"><x-icon name="check" class="size-5" /></span>
             <span class="min-w-0 flex-1 leading-tight">
                 <span class="block truncate text-sm opacity-75">Cobrado {{ $lastTitle }}</span>
                 <span class="num block text-2xl font-bold">{{ money($lastTotal) }}</span>
@@ -1066,7 +1061,7 @@ new #[Title('Vender')] class extends Component
                             <template x-for="x in catalog[editor.product_id]?.extras ?? []" :key="x.id">
                                 <button type="button" @click="toggle('extras', x.id)"
                                         class="chip gap-1.5"
-                                        :class="editor.extras.some(y => y == x.id) && '!border-salsa !bg-salsa !text-white'">
+                                        :class="editor.extras.some(y => y == x.id) && '!border-salsa !bg-salsa !text-on-salsa'">
                                     <span x-text="x.name"></span>
                                     <span class="num opacity-80" x-show="x.price > 0" x-text="'+' + fmt(x.price)"></span>
                                 </button>

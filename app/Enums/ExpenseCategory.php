@@ -39,7 +39,7 @@ enum ExpenseCategory: string
             self::Ingredients => 'bg-limon text-on-limon',
             self::Disposables => 'bg-naranja-soft text-ink',
             self::Gas => 'bg-chile-soft text-chile',
-            self::Equipment => 'bg-crema text-on-limon',
+            self::Equipment => 'bg-crema text-ink',
             self::Other => 'bg-sunken text-muted',
         };
     }

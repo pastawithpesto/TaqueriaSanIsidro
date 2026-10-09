@@ -24,8 +24,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd657">
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#3d2e0c">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd34d">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#231c17">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -42,29 +42,29 @@
     <div id="busy" aria-hidden="true"></div>
 
     <div class="md:grid md:min-h-dvh md:grid-cols-[15.5rem_1fr]">
-        {{-- Barra lateral (escritorio) --}}
-        <div class="hidden border-r border-line bg-surface md:block">
+        {{-- Barra lateral (escritorio): el marco café de la app; lo activo en amarillo. --}}
+        <div class="hidden bg-panel md:block">
             <aside class="sticky top-0 flex h-dvh flex-col p-4">
-                <a href="{{ route('vender') }}" wire:navigate class="bg-brand mb-6 flex items-center gap-3 rounded-2xl p-3">
-                    <x-logo class="size-12 ring-2 ring-white/70" :res="192" />
-                    <span class="font-display text-xl leading-[1.05] font-bold text-balance text-ink">{{ Branding::name() }}</span>
+                <a href="{{ route('vender') }}" wire:navigate class="mb-6 flex items-center gap-3 rounded-2xl p-2 hover:bg-white/5">
+                    <x-logo class="size-12 ring-2 ring-limon" :res="192" />
+                    <span class="font-display text-[1.375rem] leading-[1.05] text-balance text-on-panel">{{ Branding::name() }}</span>
                 </a>
                 <nav class="flex flex-col gap-0.5" aria-label="Principal">
                     @foreach ($main as [$route, $label, $icon])
                         <x-nav-link :route="$route" :icon="$icon" :count="$route === 'pedidos' ? $pendingCount : 0" data-tour="nav-{{ $route }}">{{ $label }}</x-nav-link>
                     @endforeach
                     <div class="flex flex-col gap-0.5" data-tour="nav-admin">
-                        <p class="mt-5 mb-1.5 px-3 text-xs font-semibold text-muted">Administración</p>
+                        <p class="mt-5 mb-1.5 px-3 text-xs font-medium text-panel-muted/80">Administración</p>
                         @foreach ($more as [$route, $label, $icon])
                             <x-nav-link :route="$route" :icon="$icon">{{ $label }}</x-nav-link>
                         @endforeach
                     </div>
                 </nav>
-                <div class="mt-auto border-t border-line pt-3">
-                    <p class="truncate px-3 pb-1 text-sm text-muted">{{ auth()->user()->name }}</p>
+                <div class="mt-auto border-t border-white/10 pt-3">
+                    <p class="truncate px-3 pb-1 text-sm text-panel-muted">{{ auth()->user()->name }}</p>
                     <form method="POST" action="{{ route('logout') }}">
                         @csrf
-                        <button class="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-[15px] font-semibold text-muted hover:bg-sunken hover:text-ink">
+                        <button class="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-[15px] font-medium text-panel-muted hover:bg-white/8 hover:text-on-panel">
                             <x-icon name="logout" /> Cerrar sesión
                         </button>
                     </form>
@@ -83,20 +83,20 @@
             @foreach ($main as [$route, $label, $icon])
                 @php $active = request()->routeIs($route); @endphp
                 <a href="{{ route($route) }}" wire:navigate data-tour="nav-{{ $route }}"
-                   class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $active ? 'text-ink' : 'text-muted' }}"
+                   class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-medium {{ $active ? 'text-ink' : 'text-muted' }}"
                    @if ($active) aria-current="page" @endif>
-                    <span class="relative flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-chile text-white' : '' }}">
+                    <span class="relative flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-limon text-on-limon' : '' }}">
                         <x-icon :name="$icon" class="size-[22px]" />
                         @if ($route === 'pedidos' && $pendingCount > 0)
-                            <span class="num absolute -top-1.5 right-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-limon px-1 text-xs font-bold text-on-limon ring-2 ring-surface">{{ $pendingCount }}</span>
+                            <span class="num absolute -top-1.5 right-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-chile px-1 text-xs text-white ring-2 ring-surface">{{ $pendingCount }}</span>
                         @endif
                     </span>
                     {{ $label }}
                 </a>
             @endforeach
             <button type="button" @click="more = true" data-tour="nav-mas"
-                    class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-semibold {{ $moreActive ? 'text-ink' : 'text-muted' }}">
-                <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $moreActive ? 'bg-chile text-white' : '' }}">
+                    class="flex min-h-[3.75rem] flex-col items-center justify-center gap-1 text-[11px] font-medium {{ $moreActive ? 'text-ink' : 'text-muted' }}">
+                <span class="flex h-7 w-14 items-center justify-center rounded-full {{ $moreActive ? 'bg-limon text-on-limon' : '' }}">
                     <x-icon name="more" class="size-[22px]" />
                 </span>
                 Más

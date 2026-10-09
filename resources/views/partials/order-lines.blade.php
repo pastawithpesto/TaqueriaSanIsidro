@@ -3,7 +3,7 @@
     <template x-for="(line, i) in list()" :key="i + '-' + line.product_id + '-' + line.qty + '-' + (line.choices ?? []).join('.') + '-' + (line.without ?? []).join('.') + '-' + (line.extras ?? []).join('.') + '-' + (line.notes ?? '')">
         <li>
             <button type="button" @click="edit(i)" class="flex w-full items-start gap-3 py-2.5 text-left">
-                <span class="num w-7 shrink-0 text-2xl leading-none font-bold text-chile" x-text="line.qty"></span>
+                <span class="num w-7 shrink-0 text-2xl leading-none" x-text="line.qty"></span>
                 <span class="min-w-0 flex-1">
                     <span class="block text-[15px] font-semibold" :class="! catalog[line.product_id] && 'text-chile'" x-text="catalog[line.product_id]?.name ?? 'Ya no está a la venta'"></span>
                     <span class="mt-0.5 flex flex-wrap gap-1">

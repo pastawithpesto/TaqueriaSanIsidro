@@ -4,70 +4,75 @@
 @source '../../storage/framework/views/*.php';
 
 /*
- * Paleta del logo de Taquería San Isidro: rojo del aro, degradado amarillo a
- * naranja, café de las letras y crema del fondo. Verde solo para estados.
+ * Taquería San Isidro, a partir del logo: el disco amarillo cempasúchil, el aro rojo
+ * chile y el café mole de las letras. Cada color tiene un solo trabajo:
+ *   amarillo (limon)  lo seleccionado y dónde estás;
+ *   rojo (chile)      la acción principal y las alertas;
+ *   café (ink/panel)  el texto y el marco de la app.
+ * Verde (salsa) solo para dinero que entra y estados bien; naranja para domicilio.
+ * Lilita One es la voz (títulos, productos, dinero) y Rubik el texto de la interfaz.
  * Radios: hojas 24px, tarjetas 16px, controles 12px, chips redondos.
  */
 @theme {
-    --font-sans: 'Barlow', ui-sans-serif, system-ui, sans-serif;
-    --font-display: 'Barlow Condensed', 'Barlow', ui-sans-serif, system-ui, sans-serif;
+    --font-sans: 'Rubik', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Lilita One', 'Rubik', ui-sans-serif, system-ui, sans-serif;
 
-    --color-bg: #fdf5e8;
+    --color-bg: #f8f5ef;
     --color-surface: #ffffff;
-    --color-sunken: #f8ead3;
-    --color-ink: #4e2c11;
-    --color-muted: #8a6a4f;
-    --color-line: #f0dfc4;
+    --color-sunken: #f1ebe1;
+    --color-ink: #33200f;
+    --color-muted: #75604e;
+    --color-line: #e7ddcc;
 
-    /* Rojo de acción (un poco más profundo que el del logo para que el texto blanco se lea bien) */
-    --color-chile: #e02424;
-    --color-chile-strong: #c21b1b;
-    --color-chile-soft: #ffe2dc;
+    /* Marco de escritorio (barra lateral). */
+    --color-panel: #2b1a0c;
+    --color-on-panel: #f7ecdc;
+    --color-panel-muted: #c4ad94;
+
+    --color-chile: #d52a1e;
+    --color-chile-strong: #b51f15;
+    --color-chile-soft: #fde4df;
     --color-rojo: #ff3131;
-    --color-limon: #ffda58;
-    --color-limon-soft: #fff1c2;
-    --color-naranja: #fe964d;
-    --color-naranja-soft: #ffe6d2;
-    --color-crema: #f3d3a0;
-    --color-salsa: #17803d;
-    --color-salsa-soft: #e0f2e6;
+    --color-limon: #ffc233;
+    --color-limon-soft: #fff2c9;
+    --color-naranja: #f08a3c;
+    --color-naranja-soft: #fde8d6;
+    --color-crema: #f1dcb4;
+    --color-salsa: #1e8449;
+    --color-salsa-soft: #dff1e5;
 
-    --color-on-limon: #4e2c11;
-    --color-sales: #e02424;
+    --color-on-limon: #33200f;
+    --color-on-salsa: #ffffff;
+    --color-sales: #33200f;
     --color-spend: #e3a21a;
-
-    --color-tint-1: #fff1c2;
-    --color-tint-2: #ffe6d2;
-    --color-tint-3: #ffe2dc;
-    --color-tint-4: #f9e7c5;
-    --color-tint-5: #fde4d4;
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --color-bg: #1a110a;
-        --color-surface: #25180e;
-        --color-sunken: #332217;
-        --color-ink: #fbebd3;
-        --color-muted: #c2a68a;
-        --color-line: #3f2c1e;
+        --color-bg: #191411;
+        --color-surface: #231c17;
+        --color-sunken: #2d251f;
+        --color-ink: #f7efe5;
+        --color-muted: #b8a797;
+        --color-line: #3a3029;
 
-        --color-chile: #e02424;
-        --color-chile-strong: #f04438;
-        --color-chile-soft: #4a1a14;
-        --color-limon-soft: #3d3112;
-        --color-naranja-soft: #40261a;
+        --color-panel: #120e0b;
+        --color-on-panel: #f7efe5;
+        --color-panel-muted: #a8988a;
+
+        --color-chile: #e8392c;
+        --color-chile-strong: #ff5547;
+        --color-chile-soft: #3f1c17;
+        --color-limon-soft: #3a2f10;
+        --color-naranja: #f59a55;
+        --color-naranja-soft: #3d2618;
+        --color-crema: #4a3a28;
         --color-salsa: #4cc07a;
-        --color-salsa-soft: #153322;
+        --color-salsa-soft: #16301f;
+        --color-on-salsa: #0f2418;
 
-        --color-sales: #d63a2f;
+        --color-sales: #f7efe5;
         --color-spend: #e3a21a;
-
-        --color-tint-1: #3a2e10;
-        --color-tint-2: #3f2616;
-        --color-tint-3: #401d17;
-        --color-tint-4: #382a13;
-        --color-tint-5: #3d2418;
     }
 }
 
@@ -75,18 +80,21 @@
     color-scheme: light dark;
 }
 
-html {
-    -webkit-tap-highlight-color: transparent;
-    text-size-adjust: 100%;
-}
-
-body {
-    font-family: var(--font-sans);
-    background: var(--color-bg);
-    color: var(--color-ink);
-}
-
 @layer base {
+    html {
+        -webkit-tap-highlight-color: transparent;
+        text-size-adjust: 100%;
+        /* Lilita One tiene un solo peso: que el navegador no invente negritas. */
+        font-synthesis: none;
+    }
+
+    /* En la capa base para que utilidades como bg-brand (login) puedan cambiar el fondo. */
+    body {
+        font-family: var(--font-sans);
+        background: var(--color-bg);
+        color: var(--color-ink);
+    }
+
     :focus-visible {
         outline: 2px solid var(--color-chile);
         outline-offset: 2px;
@@ -114,14 +122,15 @@ body {
 @utility num {
     font-family: var(--font-display);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.005em;
+    letter-spacing: 0.01em;
 }
 
+/* El disco del logo. De noche el amarillo encandila: el encabezado queda liso. */
 @utility bg-brand {
-    background: linear-gradient(105deg, #ffda58 0%, #ffbc53 55%, #fe964d 100%);
+    background: linear-gradient(105deg, #ffd34d 0%, #ffbb45 55%, #f8913f 100%);
 
     @media (prefers-color-scheme: dark) {
-        background: linear-gradient(105deg, #3d2e0c 0%, #432812 55%, #4a2210 100%);
+        background: var(--color-surface);
     }
 }
 
@@ -131,10 +140,10 @@ body {
 
 @layer components {
     .page-title {
-        @apply font-display text-[1.75rem] leading-none font-bold md:text-[2.5rem];
+        @apply font-display text-[1.75rem] leading-none tracking-[0.01em] md:text-[2.5rem];
     }
     .section-title {
-        @apply font-display text-[1.375rem] leading-tight font-bold;
+        @apply font-display text-[1.375rem] leading-tight;
     }
     .card {
         @apply rounded-2xl border border-line bg-surface p-4;
@@ -176,7 +185,16 @@ body {
         @apply inline-flex min-h-9 shrink-0 items-center rounded-full border border-line bg-surface px-3.5 text-sm font-semibold whitespace-nowrap text-ink select-none motion-safe:transition;
     }
     .chip[aria-pressed='true'] {
-        @apply border-ink bg-ink text-bg;
+        @apply border-limon bg-limon text-on-limon;
+    }
+    /* Sobre el encabezado amarillo (celular), el amarillo no se distingue: ahí lo activo va en café o blanco. */
+    @media (prefers-color-scheme: light) and (max-width: 767px) {
+        .bg-brand .chip[aria-pressed='true'] {
+            @apply border-ink bg-ink text-bg;
+        }
+        .bg-brand .segmented > button[aria-pressed='true'] {
+            @apply bg-surface text-ink;
+        }
     }
     .badge {
         @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold whitespace-nowrap;
@@ -190,7 +208,7 @@ body {
         @apply min-h-10 rounded-lg px-2 text-sm font-semibold whitespace-nowrap text-muted select-none motion-safe:transition;
     }
     .segmented > button[aria-pressed='true'] {
-        @apply bg-surface text-ink shadow-sm;
+        @apply bg-limon text-on-limon shadow-sm;
     }
 
     /* Menú contextual */
