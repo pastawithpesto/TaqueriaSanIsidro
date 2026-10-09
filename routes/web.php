@@ -20,6 +20,12 @@ Route::middleware('auth')->group(function () {
     Route::livewire('/insumos', 'pages::insumos')->name('insumos');
     Route::livewire('/ajustes', 'pages::ajustes')->name('ajustes');
 
+    Route::post('/tutorial/visto', function (Request $request) {
+        $request->user()->update(['onboarded_at' => now()]);
+
+        return response()->noContent();
+    })->name('tutorial.done');
+
     Route::post('/logout', function (Request $request) {
         Auth::logout();
         $request->session()->invalidate();

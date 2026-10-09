@@ -172,6 +172,16 @@ new #[Title('Ajustes')] class extends Component
         <button class="btn-primary" wire:loading.attr="disabled">Cambiar contraseña</button>
     </form>
 
+    {{-- Tutorial --}}
+    <section class="card flex items-center gap-4">
+        <span class="grid size-12 shrink-0 place-items-center rounded-2xl bg-limon text-on-limon"><x-icon name="info" class="size-6" /></span>
+        <div class="min-w-0 flex-1">
+            <h2 class="section-title">Tutorial</h2>
+            <p class="text-sm text-muted">Repasa cómo vender, cobrar y llevar tus gastos.</p>
+        </div>
+        <button type="button" class="btn" @click="$dispatch('open-tutorial')">Ver tutorial</button>
+    </section>
+
     {{-- Instalación --}}
     <section class="card space-y-1">
         <h2 class="section-title">Instalar en el celular</h2>

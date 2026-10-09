@@ -19,6 +19,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd657">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#3d2e0c">
     <meta name="mobile-web-app-capable" content="yes">
@@ -167,6 +168,8 @@
             </div>
         </div>
     </div>
+
+    <x-onboarding />
 
     @livewireScripts
     <script>
