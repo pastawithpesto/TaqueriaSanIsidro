@@ -229,7 +229,8 @@ new #[Title('Resumen')] class extends Component
                         </div>
                         <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sunken"><div class="h-full rounded-full bg-sales" style="width: {{ (int) $row->qty / $maxQty * 100 }}%"></div></div>
                         <p class="mt-1.5 text-sm text-muted">
-                            {{ Number::currency((float) $row->revenue) }} en ventas@if ((float) $row->cost > 0), deja <span class="font-semibold text-salsa">{{ Number::currency((float) $row->revenue - (float) $row->cost) }}</span>@endif
+                            {{ Number::currency((float) $row->revenue) }} en ventas.
+                            @if ((float) $row->cost > 0) Deja <span class="font-semibold text-salsa">{{ Number::currency((float) $row->revenue - (float) $row->cost) }}</span>. @endif
                         </p>
                     </li>
                 @endforeach
