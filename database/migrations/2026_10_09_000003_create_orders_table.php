@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('payment_reference')->nullable();
             $table->decimal('total', 10, 2)->default(0);
             $table->text('notes')->nullable();
-            $table->timestamp('sold_at')->useCurrent()->index();
+            $table->timestamp('sold_at')->index();
             $table->timestamps();
         });
 

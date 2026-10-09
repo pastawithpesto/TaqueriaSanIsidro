@@ -1,0 +1,46 @@
+<?php
+
+return [
+    'required' => 'El campo :attribute es obligatorio.',
+    'required_with' => 'El campo :attribute es obligatorio.',
+    'required_if' => 'El campo :attribute es obligatorio.',
+    'email' => 'El campo :attribute debe ser un correo válido.',
+    'numeric' => 'El campo :attribute debe ser un número.',
+    'integer' => 'El campo :attribute debe ser un número entero.',
+    'string' => 'El campo :attribute debe ser texto.',
+    'date' => 'El campo :attribute debe ser una fecha válida.',
+    'date_format' => 'El campo :attribute no tiene un formato válido.',
+    'boolean' => 'El campo :attribute debe ser verdadero o falso.',
+    'exists' => 'El valor de :attribute no es válido.',
+    'in' => 'El valor de :attribute no es válido.',
+    'enum' => 'El valor de :attribute no es válido.',
+    'unique' => 'Ese valor de :attribute ya existe.',
+    'min' => [
+        'numeric' => 'El campo :attribute debe ser al menos :min.',
+        'string' => 'El campo :attribute debe tener al menos :min caracteres.',
+        'array' => 'El campo :attribute debe tener al menos :min elementos.',
+    ],
+    'max' => [
+        'numeric' => 'El campo :attribute no puede ser mayor que :max.',
+        'string' => 'El campo :attribute no puede tener más de :max caracteres.',
+        'array' => 'El campo :attribute no puede tener más de :max elementos.',
+    ],
+    'gt' => [
+        'numeric' => 'El campo :attribute debe ser mayor que :value.',
+    ],
+    'attributes' => [
+        'email' => 'correo',
+        'password' => 'contraseña',
+        'name' => 'nombre',
+        'price' => 'precio',
+        'category' => 'categoría',
+        'unit' => 'unidad',
+        'cost_per_unit' => 'costo por unidad',
+        'total' => 'total',
+        'quantity' => 'cantidad',
+        'spent_on' => 'fecha',
+        'ingredient_id' => 'insumo',
+        'method' => 'método de pago',
+        'reference' => 'referencia',
+    ],
+];

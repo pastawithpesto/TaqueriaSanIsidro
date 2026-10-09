@@ -21,6 +21,12 @@ La primera vez crea `.env`, instala dependencias, genera la llave y corre las mi
 - Vite (HMR): puerto 5174
 - PostgreSQL: puerto 5433 (usuario `taqueria`, password `secret`, base `taqueria`)
 
+En local el seeder crea el usuario `admin@taqueria.test` con contraseña `password`. En producción:
+
+```sh
+docker compose exec app php artisan app:create-user
+```
+
 Los puertos se cambian en `.env` (`APP_PORT`, `VITE_PORT`, `FORWARD_DB_PORT`).
 
 ## Comandos útiles
@@ -32,6 +38,18 @@ docker compose exec app composer require <paquete>
 docker compose logs -f app
 ```
 
-## Estado
+## Módulos
 
-En construcción. Módulos planeados: ventas, gastos e insumos, productos con costeo por receta, reportes.
+- Vender: botones por producto, total, método de pago (efectivo, transferencia, tarjeta) y cambio.
+- Ventas: historial por día, con cancelación.
+- Gastos: compras de insumos, gas, desechables, etc. Una compra de insumo con cantidad actualiza el costo por unidad.
+- Productos: precio, categoría y receta. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte.
+- Insumos: catálogo con unidad y costo.
+- Resumen: ventas, gastos, ganancia por receta y ventas menos gastos, por periodo.
+
+Cada venta guarda el costo de receta del momento, así el historial no cambia si luego sube la carne.
+
+## Pendiente
+
+- Cobro con tarjeta (Mercado Pago). La orden ya guarda `payment_method` y `payment_reference`.
+- Inventario y mermas.
