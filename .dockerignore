@@ -1,0 +1,25 @@
+# Contexto de la imagen de producción (docker/prod/Dockerfile).
+.git
+.env
+.env.*
+!.env.example
+node_modules
+vendor
+public/build
+public/hot
+public/fonts-manifest.dev.json
+bootstrap/cache/*.php
+storage/app/private/*
+storage/app/public/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/logs/*
+tests
+.phpunit.result.cache
+.phpunit.cache
+.claude
+.mcp.json
+.idea
+.vscode
+.playwright-mcp

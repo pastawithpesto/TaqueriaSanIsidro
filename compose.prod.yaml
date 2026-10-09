@@ -1,0 +1,73 @@
+# Producción (Portainer en el VPS). Las variables salen del .env junto a este archivo
+# o de las variables del stack en Portainer. Obligatorias: APP_KEY, APP_URL y DB_PASSWORD.
+#   docker compose -f compose.prod.yaml up -d --build
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/prod/Dockerfile
+      target: app
+    restart: unless-stopped
+    environment:
+      APP_NAME: "Taquería San Isidro"
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?Falta APP_KEY}
+      APP_URL: ${APP_URL:?Falta APP_URL}
+      APP_LOCALE: es
+      APP_FALLBACK_LOCALE: es
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Matamoros}
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: ${LOG_LEVEL:-warning}
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-taqueria}
+      DB_USERNAME: ${DB_USERNAME:-taqueria}
+      DB_PASSWORD: ${DB_PASSWORD:?Falta DB_PASSWORD}
+      SESSION_DRIVER: database
+      SESSION_LIFETIME: ${SESSION_LIFETIME:-720}
+      SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-true}
+      CACHE_STORE: database
+      QUEUE_CONNECTION: database
+      MAIL_MAILER: log
+      # Solo si hay un proxy o túnel HTTPS delante (ej. *). Sin proxy debe quedar vacío.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    volumes:
+      # Logo subido, archivos temporales y vistas compiladas.
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/prod/Dockerfile
+      target: web
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8090}:80"
+    depends_on:
+      - app
+
+  # Sin puertos publicados: solo la app llega a la base.
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-taqueria}
+      POSTGRES_USER: ${DB_USERNAME:-taqueria}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Falta DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-taqueria} -d ${DB_DATABASE:-taqueria}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:
+  storage:
