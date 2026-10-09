@@ -14,7 +14,7 @@ class OrderBuilder
 {
     /**
      * @param  array<int, array{product_id: int, qty: int, without?: array<int>, extras?: array<int>, notes?: ?string}>  $lines
-     * @return array{items: array<int, array<string, mixed>>, total: float}
+     * @return array{items: array<int, array<string, mixed>>, total: float, missing: array<int, string>}
      */
     public static function items(array $lines): array
     {
@@ -22,7 +22,7 @@ class OrderBuilder
             ->filter(fn ($l) => is_array($l) && (int) ($l['qty'] ?? 0) > 0 && isset($l['product_id']))
             ->values();
 
-        $products = Product::with(['ingredients', 'extras.ingredient'])
+        $products = Product::with(['ingredients', 'extras.ingredient', 'optionGroups.choices'])
             ->where('active', true)
             ->whereIn('id', $lines->pluck('product_id')->map(fn ($id) => (int) $id))
             ->get()
@@ -30,6 +30,7 @@ class OrderBuilder
 
         $items = [];
         $total = 0.0;
+        $missing = [];
 
         foreach ($lines as $line) {
             $product = $products->get((int) $line['product_id']);
@@ -44,12 +45,26 @@ class OrderBuilder
             $extras = $product->extras->whereIn('id', collect($line['extras'] ?? [])->map(fn ($id) => (int) $id))->values();
             $notes = trim((string) ($line['notes'] ?? '')) ?: null;
 
-            $unitPrice = round((float) $product->price + $extras->sum(fn ($e) => (float) $e->price), 2);
+            // Una opción por grupo; los grupos obligatorios deben tener una.
+            $picked = collect($line['choices'] ?? [])->map(fn ($id) => (int) $id);
+            $choices = collect();
+            foreach ($product->optionGroups as $group) {
+                // Si llegan dos del mismo grupo, se respeta la primera que se eligió.
+                $choice = $picked->map(fn ($id) => $group->choices->firstWhere('id', $id))->filter()->first();
+                if ($choice) {
+                    $choices->push(['group' => $group, 'choice' => $choice]);
+                } elseif ($group->required) {
+                    $missing[] = $group->name.' en '.$product->name;
+                }
+            }
+
+            $unitPrice = round((float) $product->price + $extras->sum(fn ($e) => (float) $e->price) + $choices->sum(fn ($c) => (float) $c['choice']->price), 2);
             $unitCost = round($product->unitCost($without->all()) + $extras->sum(fn ($e) => $e->cost()), 4);
             $subtotal = round($unitPrice * $qty, 2);
             $total += $subtotal;
 
-            $modifiers = $without->map(fn ($id) => ['type' => 'without', 'id' => $id, 'name' => $removable[$id]->name])
+            $modifiers = $choices->map(fn ($c) => ['type' => 'choice', 'id' => $c['choice']->id, 'group' => $c['group']->name, 'name' => $c['choice']->name, 'price' => (float) $c['choice']->price])
+                ->concat($without->map(fn ($id) => ['type' => 'without', 'id' => $id, 'name' => $removable[$id]->name]))
                 ->concat($extras->map(fn ($e) => ['type' => 'extra', 'id' => $e->id, 'name' => $e->name, 'price' => (float) $e->price]))
                 ->values()->all();
 
@@ -65,7 +80,7 @@ class OrderBuilder
             ];
         }
 
-        return ['items' => $items, 'total' => round($total, 2)];
+        return ['items' => $items, 'total' => round($total, 2), 'missing' => array_values(array_unique($missing))];
     }
 
     /** Reemplaza las partidas de la orden y actualiza su total (productos más empaque). */
@@ -84,6 +99,7 @@ class OrderBuilder
             'qty' => $item->quantity,
             'without' => collect($item->modifiers ?? [])->where('type', 'without')->pluck('id')->values()->all(),
             'extras' => collect($item->modifiers ?? [])->where('type', 'extra')->pluck('id')->values()->all(),
+            'choices' => collect($item->modifiers ?? [])->where('type', 'choice')->pluck('id')->values()->all(),
             'notes' => $item->notes ?? '',
         ])->filter(fn ($l) => $l['product_id'])->values()->all();
     }

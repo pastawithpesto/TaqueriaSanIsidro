@@ -29,6 +29,11 @@ class Product extends Model
         return $this->sold_out_on?->isToday() ?? false;
     }
 
+    public function optionGroups(): HasMany
+    {
+        return $this->hasMany(ProductOptionGroup::class)->orderBy('sort_order')->orderBy('id');
+    }
+
     public function extras(): HasMany
     {
         return $this->hasMany(ProductExtra::class)->orderBy('sort_order')->orderBy('id');

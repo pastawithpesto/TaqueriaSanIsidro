@@ -79,7 +79,7 @@ new #[Title('Vender')] class extends Component
     #[Computed]
     public function products()
     {
-        return Product::with(['ingredients', 'extras'])->where('active', true)->orderBy('sort_order')->orderBy('name')->get();
+        return Product::with(['ingredients', 'extras', 'optionGroups.choices'])->where('active', true)->orderBy('sort_order')->orderBy('name')->get();
     }
 
     #[Computed]
@@ -99,6 +99,10 @@ new #[Title('Vender')] class extends Component
             'without' => $p->ingredients->filter(fn ($i) => $i->pivot->removable)
                 ->map(fn ($i) => ['id' => $i->id, 'name' => $i->name])->values()->all(),
             'extras' => $p->extras->map(fn ($e) => ['id' => $e->id, 'name' => $e->name, 'price' => (float) $e->price])->values()->all(),
+            'options' => $p->optionGroups->map(fn ($g) => [
+                'id' => $g->id, 'name' => $g->name, 'required' => $g->required,
+                'choices' => $g->choices->map(fn ($c) => ['id' => $c->id, 'name' => $c->name, 'price' => (float) $c->price])->values()->all(),
+            ])->filter(fn ($g) => $g['choices'])->values()->all(),
             'soldOut' => $p->isSoldOut(),
         ]])->all();
     }
@@ -194,6 +198,10 @@ new #[Title('Vender')] class extends Component
             return ['ok' => false, 'error' => 'El pedido está vacío.'];
         }
 
+        if ($built['missing']) {
+            return ['ok' => false, 'error' => 'Falta elegir: '.implode(', ', $built['missing']).'.'];
+        }
+
         if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $built['total'] + $this->feeFor($this->service)) {
             return ['ok' => false, 'error' => 'El monto recibido no alcanza para el total.'];
         }
@@ -219,6 +227,10 @@ new #[Title('Vender')] class extends Component
 
         if (! $built['items']) {
             return ['ok' => false, 'error' => 'El pedido está vacío.'];
+        }
+
+        if ($built['missing']) {
+            return ['ok' => false, 'error' => 'Falta elegir: '.implode(', ', $built['missing']).'.'];
         }
 
         $order = $this->store(OrderStatus::Open, $built);
@@ -270,11 +282,12 @@ new #[Title('Vender')] class extends Component
         },
         // Renglones del pedido: viven en $wire.lines (se mandan al servidor solo al cobrar o guardar).
         list() { return Array.isArray($wire.lines) ? $wire.lines : Object.values($wire.lines ?? {}) },
-        isPlain(l) { return ! l.without?.length && ! l.extras?.length && ! (l.notes ?? '').trim() },
+        isPlain(l) { return ! l.without?.length && ! l.extras?.length && ! l.choices?.length && ! (l.notes ?? '').trim() },
         same(a, b) {
             const s = x => [...(x ?? [])].map(Number).sort().join('.');
-            return a.product_id == b.product_id && s(a.without) === s(b.without) && s(a.extras) === s(b.extras) && (a.notes ?? '').trim().toLowerCase() === (b.notes ?? '').trim().toLowerCase();
+            return a.product_id == b.product_id && s(a.without) === s(b.without) && s(a.extras) === s(b.extras) && s(a.choices) === s(b.choices) && (a.notes ?? '').trim().toLowerCase() === (b.notes ?? '').trim().toLowerCase();
         },
+        needsChoice(pid) { return (this.catalog[pid]?.options ?? []).some(g => g.required) },
         qtyOf(pid) { return this.list().filter(l => l.product_id == pid).reduce((n, l) => n + l.qty, 0) },
         tap(pid) {
             if (this.stock) return this.toggleStock(pid);
@@ -286,9 +299,11 @@ new #[Title('Vender')] class extends Component
             $wire.toggleSoldOut(pid);
         },
         add(pid) {
+            // Si el producto pide elegir algo (ej. refresco del combo), primero se elige.
+            if (this.needsChoice(pid)) return this.editNew(pid);
             const lines = this.list().map(l => ({ ...l }));
             const i = lines.findIndex(l => l.product_id == pid && this.isPlain(l));
-            i === -1 ? lines.push({ product_id: pid, qty: 1, without: [], extras: [], notes: '' }) : lines[i].qty++;
+            i === -1 ? lines.push({ product_id: pid, qty: 1, without: [], extras: [], choices: [], notes: '' }) : lines[i].qty++;
             $wire.lines = lines;
             navigator.vibrate?.(8);
             this.$nextTick(() => bump(document.getElementById('q-' + pid)));
@@ -311,11 +326,13 @@ new #[Title('Vender')] class extends Component
         },
         unit(l) {
             const p = this.catalog[l.product_id];
-            return (p?.price ?? 0) + (l.extras ?? []).reduce((t, id) => t + (p?.extras.find(e => e.id == id)?.price ?? 0), 0);
+            const choicePrice = (l.choices ?? []).reduce((t, id) => t + (p?.options.flatMap(g => g.choices).find(c => c.id == id)?.price ?? 0), 0);
+            return (p?.price ?? 0) + choicePrice + (l.extras ?? []).reduce((t, id) => t + (p?.extras.find(e => e.id == id)?.price ?? 0), 0);
         },
         mods(l) {
             const p = this.catalog[l.product_id];
             return {
+                choices: (l.choices ?? []).map(id => p?.options.flatMap(g => g.choices).find(c => c.id == id)?.name).filter(Boolean),
                 without: (l.without ?? []).map(id => 'Sin ' + (p?.without.find(w => w.id == id)?.name ?? '').toLowerCase()),
                 extras: (l.extras ?? []).map(id => p?.extras.find(e => e.id == id)?.name).filter(Boolean),
                 notes: (l.notes ?? '').trim(),
@@ -333,7 +350,17 @@ new #[Title('Vender')] class extends Component
         // Editor de indicaciones de un renglón
         edit(i) {
             const l = this.list()[i];
-            this.editor = { index: i, max: l.qty, count: l.qty, product_id: l.product_id, without: [...(l.without ?? [])], extras: [...(l.extras ?? [])], notes: l.notes ?? '' };
+            const picked = {};
+            (this.catalog[l.product_id]?.options ?? []).forEach(g => { const c = g.choices.find(c => (l.choices ?? []).some(x => x == c.id)); if (c) picked[g.id] = c.id });
+            this.editor = { index: i, isNew: false, max: l.qty, count: l.qty, product_id: l.product_id, without: [...(l.without ?? [])], extras: [...(l.extras ?? [])], choices: picked, notes: l.notes ?? '', error: '' };
+        },
+        editNew(pid) {
+            this.editor = { index: null, isNew: true, max: 99, count: 1, product_id: pid, without: [], extras: [], choices: {}, notes: '', error: '' };
+        },
+        pick(group, choiceId) {
+            const current = this.editor.choices[group.id];
+            this.editor.choices = { ...this.editor.choices, [group.id]: current == choiceId && ! group.required ? null : choiceId };
+            this.editor.error = '';
         },
         toggle(key, id) {
             const arr = this.editor[key];
@@ -342,14 +369,22 @@ new #[Title('Vender')] class extends Component
         },
         saveEdit() {
             const e = this.editor;
+            const missing = (this.catalog[e.product_id]?.options ?? []).filter(g => g.required && ! e.choices[g.id]);
+            if (missing.length) return e.error = 'Elige ' + missing.map(g => g.name.toLowerCase()).join(' y ') + '.';
             const lines = this.list().map(l => ({ ...l }));
-            const original = lines[e.index];
-            const edited = { product_id: e.product_id, qty: e.count, without: e.without, extras: e.extras, notes: e.notes.trim() };
-            if (e.count < original.qty) { original.qty -= e.count; } else { lines.splice(e.index, 1); }
+            const edited = { product_id: e.product_id, qty: e.count, without: e.without, extras: e.extras, choices: Object.values(e.choices).filter(Boolean), notes: e.notes.trim() };
+            let at = lines.length;
+            if (! e.isNew) {
+                const original = lines[e.index];
+                if (e.count < original.qty) { original.qty -= e.count; } else { lines.splice(e.index, 1); }
+                at = Math.min(e.index + 1, lines.length);
+            }
             const twin = lines.findIndex(l => this.same(l, edited));
-            twin === -1 ? lines.splice(Math.min(e.index + 1, lines.length), 0, edited) : lines[twin].qty += edited.qty;
+            twin === -1 ? lines.splice(at, 0, edited) : lines[twin].qty += edited.qty;
             $wire.lines = lines;
+            const pid = e.product_id;
             this.editor = null;
+            if (e.isNew) { navigator.vibrate?.(8); this.$nextTick(() => bump(document.getElementById('q-' + pid))) }
         },
         clear() { $wire.lines = []; $wire.received = null; $wire.reference = null; this.sheet = false },
         async confirmClear() {
@@ -595,13 +630,28 @@ new #[Title('Vender')] class extends Component
             <template x-if="editor">
                 <div class="space-y-5">
                     <div x-show="editor.max > 1" class="flex items-center justify-between gap-3 rounded-2xl bg-sunken px-4 py-3">
-                        <span class="text-[15px] font-semibold">Aplicar a</span>
+                        <span class="text-[15px] font-semibold" x-text="editor.isNew ? 'Cantidad' : 'Aplicar a'"></span>
                         <div class="flex items-center gap-3">
                             <button type="button" class="btn-icon" @click="editor.count = Math.max(1, editor.count - 1)" :disabled="editor.count <= 1" aria-label="Menos"><x-icon name="minus" /></button>
-                            <span class="num w-14 text-center text-2xl font-bold"><span x-text="editor.count"></span><span class="text-base text-muted" x-text="' de ' + editor.max"></span></span>
+                            <span class="num w-14 text-center text-2xl font-bold"><span x-text="editor.count"></span><span class="text-base text-muted" x-show="! editor.isNew" x-text="' de ' + editor.max"></span></span>
                             <button type="button" class="btn-icon" @click="editor.count = Math.min(editor.max, editor.count + 1)" :disabled="editor.count >= editor.max" aria-label="Más"><x-icon name="plus" /></button>
                         </div>
                     </div>
+
+                    <template x-for="g in catalog[editor.product_id]?.options ?? []" :key="g.id">
+                        <div>
+                            <p class="label"><span x-text="g.name"></span> <span class="font-normal text-muted" x-text="g.required ? '(elige uno)' : '(opcional)'"></span></p>
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="c in g.choices" :key="c.id">
+                                    <button type="button" @click="pick(g, c.id)" class="chip gap-1.5"
+                                            :class="editor.choices[g.id] == c.id && '!border-ink !bg-ink !text-bg'">
+                                        <span x-text="c.name"></span>
+                                        <span class="num opacity-80" x-show="c.price > 0" x-text="'+' + fmt(c.price)"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
 
                     <div x-show="catalog[editor.product_id]?.without.length">
                         <p class="label">Sin</p>
@@ -634,7 +684,9 @@ new #[Title('Vender')] class extends Component
                         <input id="line-notes" type="text" x-model="editor.notes" maxlength="120" class="input" placeholder="Ej. bien dorada, salsa aparte" @keydown.enter.prevent="saveEdit()">
                     </div>
 
-                    <p x-show="! catalog[editor.product_id]?.without.length && ! catalog[editor.product_id]?.extras.length" class="flex gap-2 text-sm text-muted">
+                    <p x-show="editor.error" x-text="editor.error" class="flex items-center gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile"></p>
+
+                    <p x-show="! catalog[editor.product_id]?.without.length && ! catalog[editor.product_id]?.extras.length && ! catalog[editor.product_id]?.options.length" class="flex gap-2 text-sm text-muted">
                         <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
                         <span>Si le agregas receta y extras a este producto en Productos, aquí aparecerán botones como "Sin cebolla".</span>
                     </p>
@@ -643,10 +695,11 @@ new #[Title('Vender')] class extends Component
 
             <x-slot:footer>
                 <div class="grid grid-cols-[auto_1fr] gap-2">
-                    <button type="button" class="btn btn-lg !px-4 text-chile" @click="removeLine(editor.index); editor = null">
+                    <button type="button" class="btn btn-lg !px-4" x-show="editor?.isNew" @click="editor = null">Cancelar</button>
+                    <button type="button" class="btn btn-lg !px-4 text-chile" x-show="! editor?.isNew" @click="removeLine(editor.index); editor = null">
                         <x-icon name="trash" class="size-4" /> Quitar
                     </button>
-                    <button type="button" class="btn-primary btn-lg" @click="saveEdit()">Listo</button>
+                    <button type="button" class="btn-primary btn-lg" @click="saveEdit()" x-text="editor?.isNew ? 'Agregar al pedido' : 'Listo'">Listo</button>
                 </div>
             </x-slot:footer>
         </x-sheet>

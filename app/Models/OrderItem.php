@@ -35,6 +35,12 @@ class OrderItem extends Model
         return collect($this->modifiers ?? [])->where('type', 'without')->pluck('name')->all();
     }
 
+    /** Opciones elegidas: [['group' => 'Refresco', 'name' => 'Coca-Cola', 'price' => 0.0]]. */
+    public function choices(): array
+    {
+        return collect($this->modifiers ?? [])->where('type', 'choice')->values()->all();
+    }
+
     /** Extras cobrados: [['name' => 'Extra queso', 'price' => 10.0]]. */
     public function extras(): array
     {

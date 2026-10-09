@@ -263,4 +263,71 @@ class OrderFlowTest extends TestCase
 
         $this->assertTrue(Order::sole()->pickup_at->isTomorrow());
     }
+
+    protected function comboWithDrinks(): array
+    {
+        $combo = Product::create(['name' => 'Combo', 'price' => 100]);
+        $group = $combo->optionGroups()->create(['name' => 'Refresco', 'required' => true]);
+        $coca = $group->choices()->create(['name' => 'Coca-Cola', 'price' => 0]);
+        $horchata = $group->choices()->create(['name' => 'Horchata', 'price' => 5]);
+
+        return [$combo, $coca, $horchata];
+    }
+
+    public function test_required_choice_must_be_picked(): void
+    {
+        [$combo] = $this->comboWithDrinks();
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $combo->id, 'qty' => 1, 'choices' => []]])
+            ->call('charge')
+            ->assertReturned(['ok' => false, 'error' => 'Falta elegir: Refresco en Combo.']);
+
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_choice_is_saved_and_its_price_added(): void
+    {
+        [$combo, $coca, $horchata] = $this->comboWithDrinks();
+
+        Livewire::test('pages::vender')
+            ->set('lines', [
+                ['product_id' => $combo->id, 'qty' => 2, 'choices' => [$coca->id]],
+                ['product_id' => $combo->id, 'qty' => 1, 'choices' => [$horchata->id, $coca->id]],
+            ])
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        $items = Order::with('items')->sole()->items->sortBy('id')->values();
+        $this->assertSame('Coca-Cola', $items[0]->choices()[0]['name']);
+        $this->assertSame('105.00', $items[1]->unit_price); // una opción por grupo: la primera que se eligió
+        $this->assertSame('305.00', Order::sole()->total);
+    }
+
+    public function test_product_options_are_saved_keeping_ids(): void
+    {
+        [$combo, $coca] = $this->comboWithDrinks();
+        $group = $combo->optionGroups()->sole();
+
+        Livewire::test('pages::productos')
+            ->call('edit', $combo->id)
+            ->assertSet('options.0.name', 'Refresco')
+            ->set('options', [
+                ['id' => $group->id, 'name' => 'Refresco', 'required' => true, 'choices' => [
+                    ['id' => $coca->id, 'name' => 'Coca-Cola', 'price' => '0'],
+                    ['id' => null, 'name' => 'Sprite', 'price' => ''],
+                    ['id' => null, 'name' => '', 'price' => ''],
+                ]],
+                ['id' => null, 'name' => 'Salsa', 'required' => false, 'choices' => [['id' => null, 'name' => 'Verde', 'price' => '0']]],
+                ['id' => null, 'name' => 'Vacío', 'required' => true, 'choices' => []],
+            ])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $groups = $combo->optionGroups()->with('choices')->get();
+        $this->assertSame(['Refresco', 'Salsa'], $groups->pluck('name')->all());
+        $this->assertSame(['Coca-Cola', 'Sprite'], $groups[0]->choices->pluck('name')->all());
+        $this->assertSame($coca->id, $groups[0]->choices[0]->id);
+        $this->assertFalse($groups[1]->required);
+    }
 }

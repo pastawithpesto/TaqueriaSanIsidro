@@ -119,6 +119,9 @@ new #[Title('Pedidos')] class extends Component
                                         <span class="block text-[17px] leading-tight font-semibold">{{ $item->product_name }}</span>
                                         @if ($item->modifiers || $item->notes)
                                             <span class="mt-1 flex flex-wrap gap-1">
+                                                @foreach ($item->choices() as $choice)
+                                                    <span class="badge bg-limon text-on-limon !text-[13px]">{{ $choice['name'] }}</span>
+                                                @endforeach
                                                 @foreach ($item->withoutNames() as $name)
                                                     <span class="badge bg-chile text-white !text-[13px]">Sin {{ mb_strtolower($name) }}</span>
                                                 @endforeach

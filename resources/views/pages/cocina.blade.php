@@ -103,6 +103,9 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                                         <span class="block text-2xl leading-tight font-semibold">{{ $item->product_name }}</span>
                                         @if ($item->modifiers || $item->notes)
                                             <span class="mt-1.5 flex flex-wrap gap-1.5">
+                                                @foreach ($item->choices() as $choice)
+                                                    <span class="rounded-lg bg-[#ffda58] px-2 py-0.5 text-lg font-bold text-[#4e2c11]">{{ $choice['name'] }}</span>
+                                                @endforeach
                                                 @foreach ($item->withoutNames() as $name)
                                                     <span class="rounded-lg bg-[#e02424] px-2 py-0.5 text-lg font-bold">SIN {{ mb_strtoupper($name) }}</span>
                                                 @endforeach

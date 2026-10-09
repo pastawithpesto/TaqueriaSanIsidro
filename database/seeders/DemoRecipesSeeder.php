@@ -75,6 +75,13 @@ class DemoRecipesSeeder extends Seeder
             'Hamburguesa combo' => [['Extra carne', 20, 'Carne para hamburguesa', 0.12], ['Tocino', 12, 'Tocino', 0.02]],
         ];
 
+        // [grupo, obligatorio, [[opción, precio extra]]]
+        $options = [
+            'Hamburguesa combo' => [
+                ['Refresco', true, [['Coca-Cola', 0], ['Sprite', 0], ['Fanta', 0], ['Coca-Cola sin azúcar', 0], ['Agua de horchata', 5]]],
+            ],
+        ];
+
         foreach ($recipes as $productName => $rows) {
             $product = Product::where('name', $productName)->first();
 
@@ -85,6 +92,14 @@ class DemoRecipesSeeder extends Seeder
             $product->ingredients()->sync(collect($rows)->mapWithKeys(fn ($r) => [
                 $i[$r[0]]->id => ['quantity' => $r[1], 'removable' => $r[2]],
             ])->all());
+
+            $product->optionGroups()->delete();
+            foreach ($options[$productName] ?? [] as $g => [$groupName, $required, $choices]) {
+                $group = $product->optionGroups()->create(['name' => $groupName, 'required' => $required, 'sort_order' => $g]);
+                foreach ($choices as $c => [$choiceName, $price]) {
+                    $group->choices()->create(['name' => $choiceName, 'price' => $price, 'sort_order' => $c]);
+                }
+            }
 
             $product->extras()->delete();
             foreach ($extras[$productName] ?? [] as $n => [$name, $price, $ingredient, $qty]) {

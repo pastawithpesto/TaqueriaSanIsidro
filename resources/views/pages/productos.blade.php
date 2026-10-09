@@ -29,6 +29,9 @@ new #[Title('Productos')] class extends Component
     /** @var array<int, array{id: ?int, name: string, price: string, ingredient_id: ?int, quantity: ?string}> */
     public array $extras = [];
 
+    /** Grupos para elegir (ej. Refresco): @var array<int, array{id: ?int, name: string, required: bool, choices: array}> */
+    public array $options = [];
+
     #[Computed]
     public function products()
     {
@@ -56,7 +59,7 @@ new #[Title('Productos')] class extends Component
 
     public function edit(int $id): void
     {
-        $p = Product::with(['ingredients', 'extras'])->findOrFail($id);
+        $p = Product::with(['ingredients', 'extras', 'optionGroups.choices'])->findOrFail($id);
 
         $this->resetForm();
         $this->editingId = $p->id;
@@ -77,13 +80,21 @@ new #[Title('Productos')] class extends Component
             'ingredient_id' => $e->ingredient_id,
             'quantity' => $e->quantity !== null ? rtrim(rtrim((string) $e->quantity, '0'), '.') : null,
         ])->values()->all();
+        $this->options = $p->optionGroups->map(fn ($g) => [
+            'id' => $g->id,
+            'name' => $g->name,
+            'required' => $g->required,
+            'choices' => $g->choices->map(fn ($c) => [
+                'id' => $c->id, 'name' => $c->name, 'price' => rtrim(rtrim((string) $c->price, '0'), '.') ?: '0',
+            ])->values()->all(),
+        ])->values()->all();
         $this->showForm = true;
     }
 
     /** Copia el producto y su receta: útil para variedades (pastor, tripa). */
     public function duplicate(int $id): void
     {
-        $source = Product::with(['ingredients', 'extras'])->findOrFail($id);
+        $source = Product::with(['ingredients', 'extras', 'optionGroups.choices'])->findOrFail($id);
 
         $copy = $source->replicate();
         $copy->name = $source->name.' (copia)';
@@ -93,6 +104,10 @@ new #[Title('Productos')] class extends Component
             fn ($i) => [$i->id => ['quantity' => $i->pivot->quantity, 'removable' => $i->pivot->removable]]
         )->all());
         $copy->extras()->createMany($source->extras->map(fn ($e) => $e->only(['name', 'price', 'ingredient_id', 'quantity', 'sort_order']))->all());
+        foreach ($source->optionGroups as $group) {
+            $copy->optionGroups()->create($group->only(['name', 'required', 'sort_order']))
+                ->choices()->createMany($group->choices->map(fn ($c) => $c->only(['name', 'price', 'sort_order']))->all());
+        }
 
         unset($this->products);
         $this->edit($copy->id);
@@ -105,7 +120,7 @@ new #[Title('Productos')] class extends Component
 
     protected function resetForm(): void
     {
-        $this->reset('showForm', 'editingId', 'name', 'category', 'price', 'sort_order', 'recipe', 'extras');
+        $this->reset('showForm', 'editingId', 'name', 'category', 'price', 'sort_order', 'recipe', 'extras', 'options');
         $this->active = true;
         $this->resetErrorBag();
     }
@@ -129,6 +144,20 @@ new #[Title('Productos')] class extends Component
             ])
             ->values()->all();
 
+        // Grupos de opciones: sin nombre o sin opciones se descartan.
+        $this->options = collect($this->options)
+            ->map(fn ($g) => [
+                'id' => $g['id'] ?? null,
+                'name' => trim((string) ($g['name'] ?? '')),
+                'required' => (bool) ($g['required'] ?? true),
+                'choices' => collect($g['choices'] ?? [])
+                    ->filter(fn ($c) => trim((string) ($c['name'] ?? '')) !== '')
+                    ->map(fn ($c) => ['id' => $c['id'] ?? null, 'name' => trim($c['name']), 'price' => (string) (($c['price'] ?? '') === '' ? '0' : $c['price'])])
+                    ->values()->all(),
+            ])
+            ->filter(fn ($g) => $g['name'] !== '' && $g['choices'])
+            ->values()->all();
+
         $data = $this->validate([
             'name' => ['required', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:255'],
@@ -141,10 +170,13 @@ new #[Title('Productos')] class extends Component
             'extras.*.price' => ['required', 'numeric', 'min:0'],
             'extras.*.ingredient_id' => ['nullable', 'exists:ingredients,id'],
             'extras.*.quantity' => ['nullable', 'required_with:extras.*.ingredient_id', 'numeric', 'gt:0'],
+            'options.*.name' => ['required', 'string', 'max:40'],
+            'options.*.choices.*.name' => ['required', 'string', 'max:40'],
+            'options.*.choices.*.price' => ['required', 'numeric', 'min:0'],
         ]);
 
         $product = DB::transaction(function () use ($data) {
-            $product = Product::updateOrCreate(['id' => $this->editingId], collect($data)->except(['recipe', 'extras'])->all());
+            $product = Product::updateOrCreate(['id' => $this->editingId], collect($data)->except(['recipe', 'extras', 'options'])->all());
 
             $product->ingredients()->sync(
                 collect($this->recipe)->mapWithKeys(fn ($r) => [$r['ingredient_id'] => ['quantity' => $r['quantity'], 'removable' => $r['removable']]])->all()
@@ -160,6 +192,18 @@ new #[Title('Productos')] class extends Component
                 $keep[] = $extra->id;
             }
             $product->extras()->whereNotIn('id', $keep)->delete();
+
+            $keepGroups = [];
+            foreach ($this->options as $gi => $g) {
+                $group = $product->optionGroups()->updateOrCreate(['id' => $g['id']], ['name' => $g['name'], 'required' => $g['required'], 'sort_order' => $gi]);
+                $keepChoices = [];
+                foreach ($g['choices'] as $ci => $c) {
+                    $keepChoices[] = $group->choices()->updateOrCreate(['id' => $c['id']], ['name' => $c['name'], 'price' => $c['price'], 'sort_order' => $ci])->id;
+                }
+                $group->choices()->whereNotIn('id', $keepChoices)->delete();
+                $keepGroups[] = $group->id;
+            }
+            $product->optionGroups()->whereNotIn('id', $keepGroups)->delete();
 
             return $product;
         });
@@ -212,6 +256,10 @@ new #[Title('Productos')] class extends Component
         toggleRemovable(i) { const rows = $wire.recipe.map(r => ({ ...r })); rows[i].removable = ! rows[i].removable; $wire.recipe = rows },
         addExtra() { $wire.extras = [...($wire.extras ?? []), { id: null, name: '', price: '', ingredient_id: null, quantity: null }] },
         removeExtra(i) { const rows = [...$wire.extras]; rows.splice(i, 1); $wire.extras = rows },
+        addGroup() { $wire.options = [...($wire.options ?? []), { id: null, name: '', required: true, choices: [{ id: null, name: '', price: '' }, { id: null, name: '', price: '' }] }] },
+        removeGroup(gi) { const g = [...$wire.options]; g.splice(gi, 1); $wire.options = g },
+        addChoice(gi) { const g = $wire.options.map(x => ({ ...x, choices: [...x.choices] })); g[gi].choices.push({ id: null, name: '', price: '' }); $wire.options = g },
+        removeChoice(gi, ci) { const g = $wire.options.map(x => ({ ...x, choices: [...x.choices] })); g[gi].choices.splice(ci, 1); $wire.options = g },
         // Un solo cálculo que lee receta y precio directamente, para que siempre se actualice.
         stats() {
             const cost = ($wire.recipe ?? []).reduce((t, r) => t + (Number(r.quantity) || 0) * (this.ings[r.ingredient_id]?.cost ?? 0), 0);
@@ -383,6 +431,39 @@ new #[Title('Productos')] class extends Component
                     <div><dt class="text-xs font-semibold text-muted">Ganas</dt><dd class="num text-2xl font-bold" :class="stats().profit > 0 ? 'text-salsa' : (stats().profit < 0 ? 'text-chile' : '')" x-text="stats().price > 0 ? fmt(stats().profit) : '-'"></dd></div>
                     <div><dt class="text-xs font-semibold text-muted">Margen</dt><dd class="num text-2xl font-bold" x-text="stats().margin === null ? '-' : stats().margin + '%'"></dd></div>
                 </dl>
+            </section>
+
+            <section class="space-y-3 rounded-2xl bg-sunken/60 p-4">
+                <div>
+                    <h3 class="section-title">Para elegir</h3>
+                    <p class="text-sm text-muted">Cosas que el cliente escoge, como el refresco del combo. Al venderlo, la app pregunta antes de agregarlo.</p>
+                </div>
+                <div wire:ignore class="space-y-3">
+                    <template x-for="(group, gi) in $wire.options ?? []" :key="gi">
+                        <div class="space-y-2 rounded-xl bg-surface p-3">
+                            <div class="flex items-center gap-2">
+                                <input type="text" x-model="group.name" maxlength="40" class="input !min-h-11 flex-1 font-semibold" placeholder="Ej. Refresco" aria-label="Nombre del grupo">
+                                <button type="button" @click="group.required = ! group.required" class="chip" :aria-pressed="!! group.required" x-text="group.required ? 'Obligatorio' : 'Opcional'"></button>
+                                <button type="button" @click="removeGroup(gi)" class="btn-quiet size-11 justify-center !px-0" aria-label="Quitar grupo"><x-icon name="trash" class="size-4" /></button>
+                            </div>
+                            <template x-for="(choice, ci) in group.choices" :key="ci">
+                                <div class="flex items-center gap-2 pl-3">
+                                    <input type="text" x-model="choice.name" maxlength="40" class="input !min-h-10 flex-1" placeholder="Ej. Coca-Cola" aria-label="Opción">
+                                    <div class="relative w-24">
+                                        <span class="num pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm font-semibold text-muted">+$</span>
+                                        <input type="number" step="0.01" min="0" inputmode="decimal" x-model="choice.price" class="input num !min-h-10 !pl-8" placeholder="0" aria-label="Precio extra de la opción">
+                                    </div>
+                                    <button type="button" @click="removeChoice(gi, ci)" class="btn-quiet size-10 justify-center !px-0" aria-label="Quitar opción"><x-icon name="x" class="size-4" /></button>
+                                </div>
+                            </template>
+                            <button type="button" @click="addChoice(gi)" class="btn-quiet ml-1"><x-icon name="plus" class="size-4" /> Opción</button>
+                        </div>
+                    </template>
+                </div>
+                @if ($errors->has('options.*'))
+                    <p class="error">Revisa las opciones: cada grupo y cada opción necesitan nombre.</p>
+                @endif
+                <button type="button" @click="addGroup()" class="btn w-full"><x-icon name="plus" class="size-4" /> Agregar algo para elegir</button>
             </section>
 
             <section class="space-y-3 rounded-2xl bg-sunken/60 p-4">

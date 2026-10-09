@@ -182,6 +182,7 @@ new #[Title('Ventas')] class extends Component
                                                 <span class="num font-bold">{{ $item->quantity }}</span> × {{ $item->product_name }} <span class="text-muted">a {{ money($item->unit_price) }}</span>
                                                 @if ($item->modifiers || $item->notes)
                                                     <span class="mt-0.5 flex flex-wrap gap-1">
+                                                        @foreach ($item->choices() as $choice) <span class="badge bg-limon-soft text-ink">{{ $choice['name'] }}</span> @endforeach
                                                         @foreach ($item->withoutNames() as $name) <span class="badge bg-chile-soft text-chile">Sin {{ mb_strtolower($name) }}</span> @endforeach
                                                         @foreach ($item->extras() as $extra) <span class="badge bg-salsa-soft text-salsa">+ {{ $extra['name'] }}</span> @endforeach
                                                         @if ($item->notes) <span class="text-muted italic">{{ $item->notes }}</span> @endif
