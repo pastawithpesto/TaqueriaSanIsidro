@@ -751,12 +751,14 @@ new #[Title('Vender')] class extends Component
                     @foreach ($this->products as $product)
                         <div wire:key="p-{{ $product->id }}" @if ($loop->first) data-tour="producto" @endif
                              x-show="category === '' || category === @js($product->category)"
-                             class="relative min-h-[8.25rem] rounded-2xl border-2 motion-safe:transition motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97]"
-                             :class="[
-                                 qtyOf({{ $product->id }}) > 0 ? 'border-limon bg-limon text-on-limon' : 'border-line bg-surface',
-                                 catalog[{{ $product->id }}]?.soldOut && 'grayscale opacity-55',
-                                 stock && 'ring-2 ring-ink/25 ring-offset-2 ring-offset-bg',
-                             ]">
+                             {{--
+                                 El estado va en atributos data-* y el CSS lo pinta: alternar juegos de clases con Alpine
+                                 dejaba tarjetas con piezas sin amarillo en algunos Android. Solo se anima el tamaño.
+                             --}}
+                             class="relative min-h-[8.25rem] rounded-2xl border-2 border-line bg-surface motion-safe:transition-transform motion-safe:duration-150 motion-safe:has-[.add:active]:scale-[0.97] data-selected:border-limon data-selected:bg-limon data-selected:text-on-limon data-sold-out:opacity-55 data-sold-out:grayscale data-stock:ring-2 data-stock:ring-ink/25 data-stock:ring-offset-2 data-stock:ring-offset-bg"
+                             :data-selected="qtyOf({{ $product->id }}) > 0"
+                             :data-sold-out="!! catalog[{{ $product->id }}]?.soldOut"
+                             :data-stock="stock">
                             <button type="button" @click="tap({{ $product->id }})" class="add absolute inset-0 w-full touch-manipulation rounded-2xl" aria-label="Agregar {{ $product->name }}"></button>
                             <span x-show="catalog[{{ $product->id }}]?.soldOut" x-cloak class="pointer-events-none absolute right-2.5 bottom-3 z-10 rounded-md bg-ink px-2 py-0.5 text-xs font-bold text-bg">Agotado</span>
                             <div class="pointer-events-none relative flex h-full min-h-[8.25rem] flex-col justify-between gap-3 p-3.5">
