@@ -758,15 +758,17 @@ new #[Title('Vender')] class extends Component
                                  stock && 'ring-2 ring-ink/25 ring-offset-2 ring-offset-bg',
                              ]">
                             <button type="button" @click="tap({{ $product->id }})" class="add absolute inset-0 w-full touch-manipulation rounded-2xl" aria-label="Agregar {{ $product->name }}"></button>
-                            <span x-show="catalog[{{ $product->id }}]?.soldOut" x-cloak class="pointer-events-none absolute top-2.5 right-2.5 z-10 rounded-md bg-ink px-2 py-0.5 text-xs font-bold text-bg">Agotado</span>
+                            <span x-show="catalog[{{ $product->id }}]?.soldOut" x-cloak class="pointer-events-none absolute right-2.5 bottom-3 z-10 rounded-md bg-ink px-2 py-0.5 text-xs font-bold text-bg">Agotado</span>
                             <div class="pointer-events-none relative flex h-full min-h-[8.25rem] flex-col justify-between gap-3 p-3.5">
-                                <p class="pr-10 font-display {{ mb_strlen($product->name) > 12 ? 'text-[1.2rem]' : 'text-[1.35rem]' }} leading-[1.05] hyphens-auto" lang="es">{{ $product->name }}</p>
+                                {{-- Una palabra larga (Hamburguesa) no se puede partir bien: se achica la letra para que quepa entera. --}}
+                                @php $longestWord = max(array_map('mb_strlen', explode(' ', $product->name))); @endphp
+                                <p class="font-display {{ $longestWord > 9 ? 'text-[1.1rem]' : (mb_strlen($product->name) > 12 ? 'text-[1.2rem]' : 'text-[1.35rem]') }} leading-[1.05] [overflow-wrap:break-word]" lang="es">{{ $product->name }}</p>
                                 <span class="num text-[1.75rem] leading-none">{{ money($product->price) }}</span>
                             </div>
                             <template x-if="qtyOf({{ $product->id }}) > 0">
                                 <div>
                                     <span id="q-{{ $product->id }}" x-text="qtyOf({{ $product->id }})"
-                                          class="num pointer-events-none absolute top-2.5 right-2.5 grid size-9 place-items-center rounded-full bg-chile text-xl text-white shadow-sm"></span>
+                                          class="num pointer-events-none absolute -top-2 -right-2 z-10 grid size-9 place-items-center rounded-full bg-chile text-xl text-white shadow-sm ring-3 ring-bg"></span>
                                     <button type="button" @click="removeOne({{ $product->id }})" class="btn-icon absolute right-2 bottom-2 touch-manipulation" aria-label="Quitar uno de {{ $product->name }}">
                                         <x-icon name="minus" />
                                     </button>
@@ -818,7 +820,8 @@ new #[Title('Vender')] class extends Component
 
     {{-- Venta registrada (la pinta el servidor después de cobrar) --}}
     @if ($lastOrderId)
-        <div wire:key="done-{{ $lastOrderId }}" x-data="{ show: true }" x-init="setTimeout(() => show = false, 10000)" x-show="show" x-cloak
+        {{-- Se quita sola a los 10 s o en cuanto empieza otro pedido: tapaba la barra del pedido nuevo. --}}
+        <div wire:key="done-{{ $lastOrderId }}" x-data="{ show: true }" x-init="setTimeout(() => show = false, 10000)" x-effect="if (count() > 0) show = false" x-show="show" x-cloak
              x-transition:leave="transition duration-200" x-transition:leave-end="opacity-0 translate-y-3"
              class="sheet-in fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex items-center gap-3 rounded-2xl bg-ink py-3 pr-3 pl-4 text-bg shadow-xl md:inset-x-auto md:right-6 md:bottom-6 md:w-96"
              role="status">

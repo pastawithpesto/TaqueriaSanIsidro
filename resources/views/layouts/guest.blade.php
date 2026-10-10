@@ -4,8 +4,10 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd657">
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#3d2e0c">
+    {{-- La app ya trae modo oscuro: evita que Chrome o Samsung Internet en Android la oscurezcan por su cuenta. --}}
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd34d">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#231c17">
     <link rel="manifest" href="{{ route('manifest') }}">
     <link rel="icon" href="{{ Branding::logoUrl(64) }}" type="image/png">
     <link rel="apple-touch-icon" href="{{ Branding::logoUrl(180) }}">
