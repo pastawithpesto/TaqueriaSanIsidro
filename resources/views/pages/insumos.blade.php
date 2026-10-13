@@ -184,8 +184,8 @@ new #[Title('Insumos')] class extends Component
                         <span class="block text-xs text-muted">por {{ $i->unit }}</span>
                     </span>
                     <div x-data="{ menu: false }" class="relative">
-                        <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $i->name }}"><x-icon name="more" /></button>
-                        <div x-show="menu" x-cloak x-transition.origin.top.right class="menu" @click="menu = false">
+                        <button type="button" x-ref="trigger" @click="menu = !menu" @click.outside="menu = false" @keydown.escape.window="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $i->name }}"><x-icon name="more" /></button>
+                        <div x-show="menu" x-cloak x-anchor.bottom-end.offset.6.fixed="$refs.trigger" x-transition.origin.top.right class="menu" @click="menu = false">
                             <button type="button" @click="sheet = true; $wire.edit({{ $i->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
                             <button type="button" wire:click="toggle({{ $i->id }})"><x-icon :name="$i->active ? 'eye-off' : 'eye'" class="size-4 text-muted" /> {{ $i->active ? 'Desactivar' : 'Activar' }}</button>
                             @if ($i->products_count === 0)

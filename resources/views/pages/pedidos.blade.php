@@ -176,8 +176,8 @@ new #[Title('Pedidos')] class extends Component
                         <div class="flex items-center gap-2 border-t border-line px-3 py-3" @if ($loop->first) data-tour="pedido-acciones" @endif>
                             @if ($open)
                                 <div x-data="{ menu: false }" class="relative">
-                                    <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-icon" aria-label="Más opciones"><x-icon name="more" /></button>
-                                    <div x-show="menu" x-cloak x-transition.origin.bottom.left class="menu !top-auto !right-auto bottom-12 left-0" @click="menu = false">
+                                    <button type="button" x-ref="trigger" @click="menu = !menu" @click.outside="menu = false" @keydown.escape.window="menu = false" class="btn-icon" aria-label="Más opciones"><x-icon name="more" /></button>
+                                    <div x-show="menu" x-cloak x-anchor.top-start.offset.6.fixed="$refs.trigger" x-transition.origin.bottom.left class="menu" @click="menu = false">
                                         <a href="{{ route('vender', ['orden' => $order->id]) }}" wire:navigate><x-icon name="pencil" class="size-4 text-muted" /> Editar pedido</a>
                                         <button type="button" class="text-chile"
                                                 @click="if (await $store.confirm.ask({ title: @js('¿Cancelar el pedido #'.$order->daily_number.'?'), message: 'No se ha cobrado. Se quitará de la lista.', action: 'Cancelar pedido', cancel: 'No' })) $wire.cancel({{ $order->id }})">

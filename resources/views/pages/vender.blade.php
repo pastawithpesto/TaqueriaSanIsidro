@@ -1003,13 +1003,13 @@ new #[Title('Vender')] class extends Component
                     <label class="label" for="reference">Referencia <span class="font-normal text-muted">(opcional)</span></label>
                     <input id="reference" type="text" x-model="$wire.reference" maxlength="255" class="input" placeholder="Folio o últimos dígitos">
                 </div>
-
-                <p x-show="error" x-cloak class="flex items-start gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile">
-                    <x-icon name="alert" class="mt-0.5 size-4 shrink-0" /> <span x-text="error"></span>
-                </p>
             </div>
 
             <x-slot:footer>
+                {{-- Va en el pie para que se vea aunque el cuadro esté desplazado. --}}
+                <p x-show="error" x-cloak role="alert" class="mb-2 flex items-start gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile">
+                    <x-icon name="alert" class="mt-0.5 size-4 shrink-0" /> <span x-text="error"></span>
+                </p>
                 <div class="grid grid-cols-[auto_1fr] gap-2" data-tour="cobrar">
                     <button type="button" @click="submit('saveOpen')" class="btn btn-lg !px-4" :disabled="busy || count() === 0">Guardar sin cobrar</button>
                     <button type="button" @click="submit('charge')" class="btn-primary btn-lg touch-manipulation"
@@ -1088,8 +1088,6 @@ new #[Title('Vender')] class extends Component
                         <input type="checkbox" x-model="editor.courtesy" class="switch">
                     </label>
 
-                    <p x-show="editor.error" x-text="editor.error" class="flex items-center gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile"></p>
-
                     <p x-show="! catalog[editor.product_id]?.without.length && ! catalog[editor.product_id]?.extras.length && ! catalog[editor.product_id]?.options.length" class="flex gap-2 text-sm text-muted">
                         <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
                         <span>Si le agregas receta y extras a este producto en Productos, aquí aparecerán botones como "Sin cebolla".</span>
@@ -1098,6 +1096,7 @@ new #[Title('Vender')] class extends Component
             </template>
 
             <x-slot:footer>
+                <p x-show="editor?.error" x-text="editor?.error" x-cloak role="alert" class="mb-2 flex items-center gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile"></p>
                 <div class="grid grid-cols-[auto_1fr] gap-2">
                     <button type="button" class="btn btn-lg !px-4" x-show="editor?.isNew" @click="editor = null">Cancelar</button>
                     <button type="button" class="btn btn-lg !px-4 text-chile" x-show="! editor?.isNew" @click="removeLine(editor.index); editor = null">

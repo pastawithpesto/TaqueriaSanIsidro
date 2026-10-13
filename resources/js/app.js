@@ -58,6 +58,18 @@ document.addEventListener('livewire:init', () => {
             }
         });
     });
+
+    // Al guardar con un error de validación, lleva la vista al primer mensaje: en un cuadro largo
+    // puede quedar arriba, fuera de la pantalla, y parece que el botón no hizo nada.
+    window.Livewire.interceptMessage(({ message, onSuccess }) => {
+        const byUser = message.getActions().some((action) => !action.name.startsWith('$') && action.metadata.type !== 'poll');
+        if (!byUser) return;
+
+        onSuccess(({ onMorphed }) => onMorphed(() => {
+            const error = [...message.component.el.querySelectorAll('.error')].find((el) => el.getClientRects().length);
+            error?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }));
+    });
 });
 
 // Rebote corto del contador de un producto; respeta "reducir movimiento".

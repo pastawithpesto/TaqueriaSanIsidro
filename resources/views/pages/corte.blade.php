@@ -222,6 +222,7 @@ new #[Title('Corte de caja')] class extends Component
 <div wire:poll.60s.visible="refreshTotals" x-data="{
         get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales + $wire.movementsNet - $wire.cashExpenses) * 100) / 100 },
         moveOpen: false,
+        moveError: '',
         get diff() {
             if ($wire.counted === null || $wire.counted === '' || isNaN($wire.counted)) return null;
             return Math.round((Number($wire.counted) - this.expected) * 100) / 100;
@@ -296,8 +297,8 @@ new #[Title('Corte de caja')] class extends Component
             <div class="flex items-center justify-between px-1">
                 <h2 class="section-title">Movimientos de caja</h2>
                 <div class="flex gap-2">
-                    <button type="button" class="btn !min-h-9 !px-3" @click="$wire.moveType = 'out'; moveOpen = true">Sacar</button>
-                    <button type="button" class="btn !min-h-9 !px-3" @click="$wire.moveType = 'in'; moveOpen = true">Meter</button>
+                    <button type="button" class="btn !min-h-9 !px-3" @click="$wire.moveType = 'out'; moveError = ''; moveOpen = true">Sacar</button>
+                    <button type="button" class="btn !min-h-9 !px-3" @click="$wire.moveType = 'in'; moveError = ''; moveOpen = true">Meter</button>
                 </div>
             </div>
             @if ($this->movements->isEmpty())
@@ -326,7 +327,8 @@ new #[Title('Corte de caja')] class extends Component
 
         <div wire:ignore>
             <x-sheet title="Movimiento de caja" open="moveOpen" x-text="$wire.moveType === 'out' ? 'Sacar efectivo' : 'Meter efectivo'" @movement-saved.window="moveOpen = false">
-                <form @submit.prevent="$wire.addMovement()" id="move-form" class="space-y-4">
+                {{-- Está dentro de wire:ignore: los errores se leen de $wire al terminar en lugar de @error. --}}
+                <form @submit.prevent="moveError = ''; await $wire.addMovement(); moveError = $wire.$errors.first('moveAmount') || $wire.$errors.first('moveReason') || $wire.$errors.first('moveType')" id="move-form" class="space-y-4">
                     <div class="segmented" role="group" aria-label="Tipo de movimiento">
                         <button type="button" @click="$wire.moveType = 'out'" :aria-pressed="$wire.moveType === 'out'">Sacar</button>
                         <button type="button" @click="$wire.moveType = 'in'" :aria-pressed="$wire.moveType === 'in'">Meter</button>
@@ -339,6 +341,7 @@ new #[Title('Corte de caja')] class extends Component
                         <label class="label" for="move-reason">Motivo <span class="font-normal text-muted">(opcional)</span></label>
                         <input id="move-reason" type="text" x-model="$wire.moveReason" maxlength="120" class="input" placeholder="Ej. depósito al banco, cambio para la caja">
                     </div>
+                    <p class="error" x-show="moveError" x-text="moveError" x-cloak></p>
                 </form>
                 <x-slot:footer>
                     <button type="submit" form="move-form" class="btn-primary btn-lg w-full" :disabled="! (Number($wire.moveAmount) > 0)">Guardar movimiento</button>
@@ -366,7 +369,8 @@ new #[Title('Corte de caja')] class extends Component
 
             <div>
                 <label class="label" for="notes">Nota <span class="font-normal text-muted">(opcional)</span></label>
-                <input id="notes" type="text" wire:model="notes" class="input" placeholder="Ej. se pagó el gas con efectivo de la caja">
+                <input id="notes" type="text" wire:model="notes" class="input" maxlength="255" placeholder="Ej. se pagó el gas con efectivo de la caja">
+                @error('notes') <p class="error">{{ $message }}</p> @enderror
             </div>
 
             <button type="button" wire:click="save" data-tour="corte-guardar" class="btn-primary btn-lg w-full" wire:loading.attr="disabled" wire:target="save">

@@ -298,6 +298,7 @@ new #[Title('Gastos')] class extends Component
                         </div>
                     </div>
                 </div>
+                @error('ingredient_id') <p class="error">{{ $message }}</p> @enderror
                 @error('quantity') <p class="error">{{ $message }}</p> @enderror
                 @if ($this->ingredients->isEmpty())
                     <p class="hint">Aún no tienes insumos. <a href="{{ route('insumos') }}" wire:navigate class="font-semibold text-chile underline">Da de alta uno</a> para que el costo de tus recetas se actualice solo.</p>
@@ -314,10 +315,11 @@ new #[Title('Gastos')] class extends Component
             <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label class="label" for="supplier">Proveedor <span class="font-normal text-muted">(opcional)</span></label>
-                    <input id="supplier" type="text" list="suppliers" wire:model="supplier" class="input">
+                    <input id="supplier" type="text" list="suppliers" wire:model="supplier" class="input" maxlength="255">
                     <datalist id="suppliers">
                         @foreach ($this->suppliers as $s) <option value="{{ $s }}"> @endforeach
                     </datalist>
+                    @error('supplier') <p class="error">{{ $message }}</p> @enderror
                 </div>
                 <div>
                     <label class="label" for="spent_on">Fecha</label>
@@ -328,7 +330,8 @@ new #[Title('Gastos')] class extends Component
 
             <div>
                 <label class="label" for="description">Nota <span class="font-normal text-muted">(opcional)</span></label>
-                <input id="description" type="text" wire:model="description" class="input">
+                <input id="description" type="text" wire:model="description" class="input" maxlength="255">
+                @error('description') <p class="error">{{ $message }}</p> @enderror
             </div>
 
             <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">

@@ -292,6 +292,7 @@ new #[Title('Productos')] class extends Component
         newIng: '',
         newQty: '',
         addError: '',
+        init() { this.$watch('sheet', () => { this.newIng = ''; this.newQty = ''; this.addError = '' }) },
         fmt(n) {
             n = Math.round(n * 100) / 100;
             const whole = Math.abs(n % 1) < 0.005;
@@ -306,6 +307,14 @@ new #[Title('Productos')] class extends Component
             const row = { ingredient_id: Number(this.newIng), quantity: String(q), removable: false };
             i === -1 ? rows.push(row) : rows.splice(i, 1, row);
             $wire.recipe = rows; this.newIng = ''; this.newQty = ''; this.addError = '';
+        },
+        // Lo que quedó en Agregar insumo sin darle Agregar también entra a la receta.
+        submit() {
+            if (this.newIng || this.newQty) {
+                this.add();
+                if (this.addError) return this.$nextTick(() => this.$refs.addError?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+            }
+            $wire.save();
         },
         remove(i) { const rows = [...$wire.recipe]; rows.splice(i, 1); $wire.recipe = rows },
         toggleRemovable(i) { const rows = $wire.recipe.map(r => ({ ...r })); rows[i].removable = ! rows[i].removable; $wire.recipe = rows },
@@ -383,8 +392,8 @@ new #[Title('Productos')] class extends Component
                             </button>
                             <span class="num text-[1.375rem] font-bold">{{ money($price) }}</span>
                             <div x-data="{ menu: false }" class="relative">
-                                <button type="button" @click="menu = !menu" @click.outside="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $p->name }}" @if ($loop->first) data-tour="producto-menu" @endif><x-icon name="more" /></button>
-                                <div x-show="menu" x-cloak x-transition.origin.top.right class="menu" @click="menu = false">
+                                <button type="button" x-ref="trigger" @click="menu = !menu" @click.outside="menu = false" @keydown.escape.window="menu = false" class="btn-quiet size-10 justify-center !px-0" aria-label="Opciones de {{ $p->name }}" @if ($loop->first) data-tour="producto-menu" @endif><x-icon name="more" /></button>
+                                <div x-show="menu" x-cloak x-anchor.bottom-end.offset.6.fixed="$refs.trigger" x-transition.origin.top.right class="menu" @click="menu = false">
                                     <button type="button" @click="sheet = true; $wire.edit({{ $p->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
                                     <button type="button" @click="sheet = true; $wire.duplicate({{ $p->id }})"><x-icon name="copy" class="size-4 text-muted" /> Duplicar</button>
                                     @unless ($loop->first)
@@ -419,7 +428,7 @@ new #[Title('Productos')] class extends Component
             <div class="h-48 animate-pulse rounded-2xl bg-sunken"></div>
         </div>
 
-        <form wire:submit="save" id="product-form" class="space-y-5" wire:loading.remove wire:target="edit,duplicate,create">
+        <form @submit.prevent="submit()" id="product-form" class="space-y-5" wire:loading.remove wire:target="edit,duplicate,create">
             <div class="grid grid-cols-2 gap-3">
                 <div class="col-span-2">
                     <label class="label" for="name">Nombre</label>
@@ -433,10 +442,11 @@ new #[Title('Productos')] class extends Component
                 </div>
                 <div>
                     <label class="label" for="category">Categoría</label>
-                    <input id="category" type="text" list="categories" wire:model="category" class="input" placeholder="Tacos">
+                    <input id="category" type="text" list="categories" wire:model="category" class="input" maxlength="255" placeholder="Tacos">
                     <datalist id="categories">
                         @foreach ($this->categories as $c) <option value="{{ $c }}"> @endforeach
                     </datalist>
+                    @error('category') <p class="error">{{ $message }}</p> @enderror
                 </div>
             </div>
 
@@ -490,7 +500,7 @@ new #[Title('Productos')] class extends Component
                             </div>
                             <button type="button" @click="add()" class="btn h-12">Agregar</button>
                         </div>
-                        <p class="error" x-show="addError" x-text="addError" x-cloak></p>
+                        <p class="error" x-ref="addError" x-show="addError" x-text="addError" x-cloak></p>
                         <p class="hint" x-show="newIng && ings[newIng]?.unit === 'kg'" x-cloak>En kilos: 0.05 kg son 50 gramos.</p>
                     </div>
                 @endif

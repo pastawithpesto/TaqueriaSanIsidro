@@ -160,8 +160,9 @@
     .input {
         @apply block min-h-12 w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-base text-ink placeholder:text-muted/70 focus:border-chile focus:ring-2 focus:ring-chile/25 focus:outline-none;
     }
+    /* El margen de scroll deja ver el campo cuando app.js lleva la vista al error. */
     .error {
-        @apply mt-1.5 text-sm font-medium text-chile;
+        @apply mt-1.5 scroll-mt-28 scroll-mb-24 text-sm font-medium text-chile;
     }
     .btn {
         @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold whitespace-nowrap text-ink select-none hover:bg-sunken disabled:pointer-events-none disabled:opacity-45 motion-safe:transition motion-safe:active:scale-[0.97];
@@ -212,8 +213,9 @@
     }
 
     /* Menú contextual */
+    /* Se posiciona con x-anchor (fixed) junto a su botón: así no lo recorta una lista con overflow-hidden. */
     .menu {
-        @apply absolute top-10 right-0 z-20 w-52 rounded-xl border border-line bg-surface p-1 shadow-xl;
+        @apply z-[60] w-52 rounded-xl border border-line bg-surface p-1 shadow-xl;
     }
     .menu > button,
     .menu > a {
