@@ -33,25 +33,30 @@ docker compose exec db createdb -U taqueria taqueria_test
 
 ## Producción
 
-`compose.prod.yaml` arma una imagen con el código, las dependencias sin las de desarrollo y los assets ya compilados. No publica el puerto de Postgres. Al arrancar corre las migraciones y `php artisan optimize`.
+Se despliega como stack de Portainer desde este repo, detrás de Nginx Proxy Manager. `compose.prod.yaml` construye la imagen con el código, las dependencias sin las de desarrollo y los assets ya compilados; no publica puertos (el proxy entra por la red `npm`) y al arrancar corre las migraciones y `php artisan optimize`.
 
-Variables (en un `.env` junto al compose o en las variables del stack de Portainer):
+En Portainer, Stacks > Add stack > Repository:
 
-- `APP_KEY`: obligatoria. Se genera con `echo "base64:$(openssl rand -base64 32)"` y no se cambia después.
-- `APP_URL`: obligatoria, la URL pública con https.
-- `DB_PASSWORD`: obligatoria.
-- `APP_PORT`: puerto del host para nginx (8090 por omisión).
-- `TRUSTED_PROXIES`: `*` solo si hay un proxy o túnel HTTPS delante. Si nginx queda expuesto directo, vacío.
+- Repository URL: `https://github.com/revmnds/TaqueriaSanIsidro`, rama `refs/heads/main`.
+- Compose path: `compose.prod.yaml`.
+- Authentication: token de GitHub (el repo es privado).
+- Environment variables:
+  - `APP_KEY`: `echo "base64:$(openssl rand -base64 32)"`. No se cambia después.
+  - `APP_URL`: la URL pública con https.
+  - `DB_PASSWORD`: `openssl rand -base64 24`.
+
+En Nginx Proxy Manager, un Proxy Host con el dominio que reenvía a `taqueria-web`, puerto 80, con certificado SSL.
+
+Primer usuario, desde la consola del contenedor `taqueria-app` en Portainer:
 
 ```sh
-docker compose -f compose.prod.yaml up -d --build
-docker compose -f compose.prod.yaml exec app php artisan app:create-user
+php artisan app:create-user
 ```
 
 El logo subido vive en el volumen `storage` y la base en `db-data`. Respaldo de la base:
 
 ```sh
-docker compose -f compose.prod.yaml exec -T db pg_dump -U taqueria taqueria > respaldo-$(date +%F).sql
+docker exec taqueria-db pg_dump -U taqueria taqueria > respaldo-$(date +%F).sql
 ```
 
 ## Comandos útiles
