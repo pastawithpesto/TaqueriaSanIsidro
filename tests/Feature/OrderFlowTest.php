@@ -77,7 +77,7 @@ class OrderFlowTest extends TestCase
         Livewire::test('pages::vender')
             ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
             ->call('saveOpen')
-            ->assertReturned(fn ($r) => $r['ok'] === false);
+            ->assertReturned(fn ($r) => $r['ok'] === false && $r['field'] === 'label');
 
         $this->assertSame(0, Order::count());
     }
@@ -144,6 +144,15 @@ class OrderFlowTest extends TestCase
         $this->assertNull($paid->fresh()->delivered_at);
     }
 
+    public function test_delivering_an_unpaid_order_asks_first(): void
+    {
+        Order::create(['daily_number' => 1, 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'label' => 'Carro rojo', 'total' => 39, 'sold_at' => now()]);
+        Livewire::test('pages::pedidos')->assertDontSee('¿Entregar sin cobrar?');
+
+        Order::create(['daily_number' => 2, 'status' => OrderStatus::Open, 'label' => 'Juan', 'total' => 39, 'sold_at' => now()]);
+        Livewire::test('pages::pedidos')->assertSee('¿Entregar sin cobrar?');
+    }
+
     public function test_open_order_can_be_cancelled_from_the_queue(): void
     {
         $open = Order::create(['daily_number' => 1, 'status' => OrderStatus::Open, 'label' => 'Juan', 'total' => 39, 'sold_at' => now()]);
@@ -182,6 +191,22 @@ class OrderFlowTest extends TestCase
 
         $this->travel(1)->days();
         $this->assertFalse($this->torta->fresh()->isSoldOut());
+    }
+
+    public function test_saved_order_keeps_its_packaging_fee_when_the_setting_changes(): void
+    {
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->set('label', 'Pedro')
+            ->set('service', 'togo')
+            ->call('saveOpen');
+        $order = Order::sole();
+        Setting::put('packaging_fee', '5');
+
+        Livewire::withQueryParams(['orden' => $order->id])->test('pages::vender')->call('charge');
+
+        $this->assertSame('0.00', $order->fresh()->packaging_fee);
+        $this->assertSame('39.00', $order->fresh()->total);
     }
 
     public function test_to_go_orders_add_the_packaging_fee(): void
@@ -396,5 +421,72 @@ class OrderFlowTest extends TestCase
 
         Livewire::test('pages::cocina')->assertDontSee('Para mañana');
         Livewire::test('pages::pedidos')->assertSee('Para mañana');
+    }
+
+    public function test_pending_counter_leaves_out_unpaid_orders_from_previous_days(): void
+    {
+        $this->travelTo(today()->setTime(12, 0));
+        $this->openOrder(['label' => 'Carro de ayer', 'sold_at' => now()->subDay()]);
+        $this->openOrder(['daily_number' => 2, 'label' => 'Carro de hoy']);
+
+        $this->getJson(route('pedidos.pending'))->assertOk()->assertExactJson(['count' => 1]);
+    }
+
+    public function test_charging_updates_the_pending_counter(): void
+    {
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->call('charge')
+            ->assertDispatched('pending-count', count: 1);
+    }
+
+    public function test_kitchen_is_told_not_to_cook_a_cancelled_order(): void
+    {
+        $order = $this->openOrder(['label' => 'Carro rojo']);
+
+        Livewire::test('pages::pedidos')->call('cancel', $order->id);
+
+        Livewire::test('pages::cocina')
+            ->assertSet('cancelled', fn ($orders) => $orders->pluck('id')->all() === [$order->id])
+            ->assertSee('No lo prepares.');
+    }
+
+    public function test_kitchen_is_not_told_about_corrections(): void
+    {
+        $order = $this->openOrder();
+        $order->cancel(Order::CORRECTION);
+
+        Livewire::test('pages::cocina')->assertSet('cancelled', fn ($orders) => $orders->isEmpty());
+    }
+
+    public function test_kitchen_sees_when_an_order_it_has_changes(): void
+    {
+        $order = $this->openOrder();
+
+        Livewire::withQueryParams(['orden' => $order->id])->test('pages::vender')->set('lines.0.qty', 2)->call('saveOpen');
+
+        $this->assertNotNull($order->fresh()->changed_at);
+        Livewire::test('pages::cocina')->assertSee('CAMBIÓ');
+    }
+
+    public function test_paid_order_to_eat_here_leaves_pedidos_when_the_kitchen_marks_it_ready(): void
+    {
+        $here = $this->openOrder(['label' => 'Mesa uno', 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'service' => 'here', 'paid_at' => now()]);
+        $togo = $this->openOrder(['daily_number' => 2, 'label' => 'Para llevar', 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'service' => 'togo', 'paid_at' => now()]);
+
+        Livewire::test('pages::cocina')->call('markReady', $here->id)->call('markReady', $togo->id);
+
+        Livewire::test('pages::pedidos')
+            ->assertSet('pending', fn ($orders) => $orders->pluck('id')->all() === [$togo->id]);
+        $this->assertSame(1, Order::pendingCount());
+        Livewire::test('pages::cocina')->assertSet('ready', fn ($orders) => $orders->count() === 2);
+    }
+
+    public function test_unpaid_order_to_eat_here_stays_in_pedidos_when_ready(): void
+    {
+        $order = $this->openOrder(['service' => 'here', 'ready_at' => now()]);
+
+        $this->assertSame(1, Order::pendingCount());
+        Livewire::test('pages::pedidos')->assertSet('pending', fn ($orders) => $orders->pluck('id')->all() === [$order->id]);
     }
 }

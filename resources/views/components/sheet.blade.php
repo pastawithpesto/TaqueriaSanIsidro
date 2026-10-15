@@ -1,8 +1,27 @@
 @props(['title', 'close' => 'cancel', 'open' => null, 'dismiss' => null])
-{{-- Con :open="expr" el cuadro se abre y cierra solo en el navegador (sin pasar por el servidor). --}}
+{{--
+    Con :open="expr" el cuadro se abre y cierra solo en el navegador (sin pasar por el servidor).
+    Al abrirse empieza desde arriba y el botón atrás del celular lo cierra (window.backButton en app.js).
+--}}
 @php $closeJs = $dismiss ?? ($open ? "$open = false" : "\$wire.$close()"); @endphp
-<div x-data {{ $attributes->except(['x-text', 'class']) }}
-     @if ($open) x-show="{{ $open }}" x-cloak x-trap.noscroll="{{ $open }}" @else x-trap.noscroll="true" @endif
+<div {{ $attributes->except(['x-text', 'class']) }}
+     @if ($open)
+         x-data="{ shown: false }"
+         x-effect="
+            const isOpen = !! ({{ $open }});
+            if (isOpen === shown) return;
+            shown = isOpen;
+            if (isOpen) {
+                backButton.opened($el, () => { {{ $closeJs }} });
+                $nextTick(() => $refs.body.scrollTop = 0);
+            } else {
+                backButton.closed($el);
+            }
+         "
+         x-show="{{ $open }}" x-cloak x-trap.noscroll="{{ $open }}"
+     @else
+         x-data x-trap.noscroll="true"
+     @endif
      @keydown.escape.window="{{ $open ? "if ($open) { $closeJs }" : $closeJs }}"
      class="fixed inset-0 z-50 flex items-end justify-center md:items-center"
      role="dialog" aria-modal="true" aria-label="{{ $title }}">
@@ -15,7 +34,7 @@
                 <x-icon name="x" />
             </button>
         </div>
-        <div class="overflow-y-auto px-5 pb-5 pt-2">{{ $slot }}</div>
+        <div x-ref="body" class="overflow-y-auto px-5 pb-5 pt-2">{{ $slot }}</div>
         @isset($footer)
             <div class="border-t border-line px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">{{ $footer }}</div>
         @endisset

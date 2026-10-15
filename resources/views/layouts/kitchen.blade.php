@@ -20,7 +20,11 @@
     <div x-data="{ items: [], push(d) { const id = Math.random(); this.items.push({ id, message: d.message }); setTimeout(() => this.items = this.items.filter(i => i.id !== id), 3000) } }"
          @toast.window="push($event.detail)" class="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex flex-col items-center gap-2" aria-live="polite">
         <template x-for="t in items" :key="t.id">
-            <div class="sheet-in rounded-xl bg-[#f7efe5] px-4 py-3 text-sm font-semibold text-[#33200f] shadow-xl" x-text="t.message"></div>
+            <button type="button" @click="items = items.filter(i => i.id !== t.id)" class="sheet-in pointer-events-auto flex items-center gap-2 rounded-xl bg-[#f7efe5] py-3 pr-3 pl-4 text-sm font-semibold text-[#33200f] shadow-xl">
+                <span x-text="t.message"></span>
+                <span class="opacity-60" aria-hidden="true"><x-icon name="x" class="size-4" /></span>
+                <span class="sr-only">Cerrar aviso</span>
+            </button>
         </template>
     </div>
     @livewireScripts

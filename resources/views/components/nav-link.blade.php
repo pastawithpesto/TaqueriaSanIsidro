@@ -1,4 +1,4 @@
-@props(['route', 'icon', 'count' => 0])
+@props(['route', 'icon', 'pending' => false])
 @php $active = request()->routeIs($route); @endphp
 <a href="{{ route($route) }}" wire:navigate.hover {{ $attributes }}
    @class([
@@ -8,7 +8,8 @@
    ])
    @if ($active) aria-current="page" @endif>
     <x-icon :name="$icon" /> <span class="flex-1">{{ $slot }}</span>
-    @if ($count > 0)
-        <span class="num grid h-6 min-w-6 place-items-center rounded-full bg-chile px-1.5 text-sm text-white">{{ $count }}</span>
+    @if ($pending)
+        {{-- El contador vive en $store.pending (app.js) para cambiar sin recargar la página. --}}
+        <span x-data x-show="$store.pending > 0" x-cloak x-text="$store.pending" class="num grid h-6 min-w-6 place-items-center rounded-full bg-chile px-1.5 text-sm text-white"></span>
     @endif
 </a>

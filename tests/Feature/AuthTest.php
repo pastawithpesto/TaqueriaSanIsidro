@@ -13,7 +13,7 @@ class AuthTest extends TestCase
 
     public function test_guests_are_redirected_to_login(): void
     {
-        foreach (['/', '/resumen', '/ventas', '/gastos', '/productos', '/insumos', '/corte'] as $path) {
+        foreach (['/', '/resumen', '/ventas', '/gastos', '/productos', '/insumos', '/corte', '/pedidos/pendientes'] as $path) {
             $this->get($path)->assertRedirect('/login');
         }
     }
@@ -24,6 +24,19 @@ class AuthTest extends TestCase
 
         Livewire::test('pages::login')
             ->set('email', 'a@b.test')
+            ->set('password', 'secret123')
+            ->call('login')
+            ->assertRedirect(route('vender'));
+
+        $this->assertAuthenticated();
+    }
+
+    public function test_email_is_matched_ignoring_case_and_spaces(): void
+    {
+        User::factory()->create(['email' => 'a@b.test', 'password' => 'secret123']);
+
+        Livewire::test('pages::login')
+            ->set('email', ' A@B.test ')
             ->set('password', 'secret123')
             ->call('login')
             ->assertRedirect(route('vender'));

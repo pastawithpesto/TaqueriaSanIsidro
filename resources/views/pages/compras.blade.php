@@ -2,6 +2,7 @@
 
 use App\Models\Ingredient;
 use App\Models\Product;
+use App\Support\BusinessDay;
 use App\Support\Consumption;
 use Carbon\CarbonImmutable;
 use Livewire\Attributes\Computed;
@@ -18,7 +19,7 @@ new #[Title('Lista de compras')] class extends Component
 
     public function mount(): void
     {
-        $this->date = today()->addDay()->toDateString();
+        $this->date = BusinessDay::today()->addDay()->toDateString();
     }
 
     protected function day(): CarbonImmutable
@@ -26,7 +27,7 @@ new #[Title('Lista de compras')] class extends Component
         try {
             return CarbonImmutable::parse($this->date)->startOfDay();
         } catch (Throwable) {
-            return CarbonImmutable::tomorrow();
+            return BusinessDay::today()->addDay();
         }
     }
 

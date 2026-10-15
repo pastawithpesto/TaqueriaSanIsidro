@@ -2,6 +2,7 @@
 
 use App\Models\Setting;
 use App\Support\Branding;
+use App\Support\BusinessDay;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -27,12 +28,23 @@ new #[Title('Ajustes')] class extends Component
 
     public ?string $delivery_fee = '0';
 
+    /** Hora en que termina el día de trabajo (0 = medianoche). */
+    public int $day_ends_at = 0;
+
     public function mount(): void
     {
         $this->name = Branding::name();
         $this->short_name = Branding::shortName();
         $this->packaging_fee = Setting::value('packaging_fee', '0');
         $this->delivery_fee = Setting::value('delivery_fee', '0');
+        $this->day_ends_at = BusinessDay::endHour();
+    }
+
+    public function saveDayEnd(): void
+    {
+        $this->validate(['day_ends_at' => ['required', 'integer', 'min:0', 'max:'.BusinessDay::LATEST_END_HOUR]]);
+        Setting::put('day_ends_at', $this->day_ends_at > 0 ? (string) $this->day_ends_at : null);
+        $this->dispatch('toast', message: 'Horario guardado');
     }
 
     public function savePackaging(): void
@@ -46,6 +58,13 @@ new #[Title('Ajustes')] class extends Component
         $this->dispatch('toast', message: 'Cobros guardados');
     }
 
+    /** El nombre y el logo salen en el menú y en el título: se recarga el encabezado para que cambien al momento. */
+    protected function refreshLayout(string $message): void
+    {
+        session()->flash('toast', $message);
+        $this->redirectRoute('ajustes', navigate: true);
+    }
+
     public function saveBusiness(): void
     {
         $data = $this->validate([
@@ -57,7 +76,7 @@ new #[Title('Ajustes')] class extends Component
         Setting::put('business_name', $data['name'] === Branding::DEFAULT_NAME ? null : $data['name']);
         Setting::put('business_short_name', $data['short_name'] === Branding::DEFAULT_SHORT_NAME ? null : $data['short_name']);
 
-        $this->dispatch('toast', message: 'Nombre guardado');
+        $this->refreshLayout('Nombre guardado');
     }
 
     public function updatedLogo(): void
@@ -82,7 +101,7 @@ new #[Title('Ajustes')] class extends Component
         }
 
         $this->reset('logo');
-        $this->dispatch('toast', message: 'Logo actualizado');
+        $this->refreshLayout('Logo actualizado');
     }
 
     public function cancelLogo(): void
@@ -95,7 +114,7 @@ new #[Title('Ajustes')] class extends Component
     {
         Branding::reset();
         $this->reset('logo');
-        $this->dispatch('toast', message: 'Se restauró el logo original');
+        $this->refreshLayout('Se restauró el logo original');
     }
 
     public function savePassword(): void
@@ -202,6 +221,24 @@ new #[Title('Ajustes')] class extends Component
         @error('packaging_fee') <p class="error">{{ $message }}</p> @enderror
         @error('delivery_fee') <p class="error">{{ $message }}</p> @enderror
         <button class="btn-primary" wire:loading.attr="disabled">Guardar</button>
+    </form>
+
+    {{-- Día de trabajo --}}
+    <form wire:submit="saveDayEnd" class="card space-y-4" data-tour="ajustes-dia">
+        <div>
+            <h2 class="section-title">Día de trabajo</h2>
+            <p class="text-sm text-muted">Si cierras después de medianoche, elige a qué hora termina el día: lo que vendas de madrugada cuenta en el día que abriste, en Ventas, el corte y el número de pedido.</p>
+        </div>
+        <div>
+            <label class="label" for="day_ends_at">El día termina a las</label>
+            <select id="day_ends_at" wire:model="day_ends_at" class="input">
+                <option value="0">12:00 de la noche</option>
+                @foreach (range(1, BusinessDay::LATEST_END_HOUR) as $hour)
+                    <option value="{{ $hour }}">{{ $hour }}:00 de la mañana</option>
+                @endforeach
+            </select>
+        </div>
+        <button class="btn-primary" wire:loading.attr="disabled">Guardar horario</button>
     </form>
 
     {{-- Contraseña --}}

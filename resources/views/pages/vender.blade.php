@@ -5,6 +5,7 @@ use App\Enums\PaymentMethod;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Setting;
+use App\Support\BusinessDay;
 use App\Support\OrderBuilder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,12 @@ new #[Title('Vender')] class extends Component
     /** Tope para los montos que se escriben a mano (descuento, propina, envío...). */
     public const MAX_AMOUNT = 100000;
 
+    /** Deshacer es para el error que se nota al cobrar; después se corrige desde Pedidos. */
+    public const UNDO_MINUTES = 2;
+
+    /** Pedidos manda aquí el id de una venta cobrada para corregirla (flash de sesión, no un parámetro en la dirección). */
+    public const CORRECT_SESSION_KEY = 'vender.corregir';
+
     /** Pedido guardado que se está editando o cobrando (?orden=12). */
     #[Url(as: 'orden')]
     public ?int $orderId = null;
@@ -32,8 +39,8 @@ new #[Title('Vender')] class extends Component
 
     public ?string $label = null;
 
-    /** 'togo' para llevar o 'here' para comer aquí. */
-    public string $service = 'togo';
+    /** 'here' para comer aquí (lo normal), 'togo' para llevar o 'delivery' a domicilio. */
+    public string $service = 'here';
 
     /** A domicilio. */
     public ?string $address = null;
@@ -66,10 +73,18 @@ new #[Title('Vender')] class extends Component
 
     public ?string $received = null;
 
+    /** Desde Pedidos, "Cobrar" abre directo el cuadro de cobro (?orden=12&cobrar=1). Al terminar se quita de la dirección. */
+    #[Url(as: 'cobrar', except: false)]
     public bool $openPay = false;
 
     /** Número de la venta que se deshizo: al volver a cobrarla conserva su número. */
     public ?int $dailyNumber = null;
+
+    /** Venta que se deshizo: si se vuelve a cobrar, es el mismo pedido del cliente. */
+    public ?int $undoneId = null;
+
+    /** Llegó desde Ventas a corregir una venta: el pedido que se estaba armando se aparta mientras tanto. */
+    public bool $correcting = false;
 
     public ?int $lastOrderId = null;
 
@@ -77,23 +92,36 @@ new #[Title('Vender')] class extends Component
 
     public ?string $lastTitle = null;
 
+    /** Cambio que se dio en la última venta en efectivo, para tenerlo a la vista al cerrar el cobro. */
+    public ?float $lastChange = null;
+
+    /** Empaque con el que se guardó el pedido que se edita: si luego cambia en Ajustes, al cliente se le cobra lo que se le dijo. */
+    public ?float $savedFee = null;
+
     public function mount(): void
     {
-        if (! $this->orderId) {
+        // Desde Pedidos, "Corregir cobro": la venta se cancela y el pedido abre aquí para cobrarlo de nuevo.
+        $correcting = session(self::CORRECT_SESSION_KEY) ? Order::with(['items', 'payments'])->where('status', OrderStatus::Paid)->find(session(self::CORRECT_SESSION_KEY)) : null;
+
+        if ($correcting) {
+            $this->orderId = null;
+            $this->correct($correcting);
+            $this->correcting = true;
+            $this->openPay = true;
+
             return;
         }
 
-        $order = Order::with('items')->where('status', OrderStatus::Open)->find($this->orderId);
+        $order = $this->orderId ? Order::with('items')->where('status', OrderStatus::Open)->find($this->orderId) : null;
 
         if (! $order) {
             $this->orderId = null;
+            $this->openPay = false;
 
             return;
         }
 
         $this->fillFrom($order);
-        // Desde Pedidos, "Cobrar" abre directo el cuadro de cobro.
-        $this->openPay = request()->boolean('cobrar');
     }
 
     /** Pasa al formulario los datos de un pedido guardado. */
@@ -101,7 +129,7 @@ new #[Title('Vender')] class extends Component
     {
         $this->lines = OrderBuilder::linesFrom($order);
         $this->label = $order->label;
-        $this->service = $order->service ?? 'togo';
+        $this->service = $order->service ?? 'here';
         $this->address = $order->delivery_address;
         $this->phone = $order->delivery_phone;
         $this->addressNotes = $order->delivery_notes;
@@ -109,6 +137,7 @@ new #[Title('Vender')] class extends Component
         $this->discount = (float) $order->discount > 0 ? $this->plain($order->discount) : null;
         $this->discountType = 'amount';
         $this->pickupTime = $order->pickup_at?->format('H:i');
+        $this->savedFee = in_array($order->service, ['togo', 'delivery'], true) ? (float) $order->packaging_fee : null;
     }
 
     /** 12.50 => "12.5", 20.00 => "20". */
@@ -123,10 +152,13 @@ new #[Title('Vender')] class extends Component
         return $this->orderId ? Order::find($this->orderId) : null;
     }
 
+    /** Agrupados por categoría, igual que en Productos: uno nuevo queda junto a los de su categoría. */
     #[Computed]
     public function products()
     {
-        return Product::with(['ingredients', 'extras', 'optionGroups.choices'])->where('active', true)->orderBy('sort_order')->orderBy('name')->get();
+        return Product::with(['ingredients', 'extras', 'optionGroups.choices'])->where('active', true)->orderBy('sort_order')->orderBy('name')->get()
+            ->groupBy(fn (Product $p) => $p->category ?: '')
+            ->flatten();
     }
 
     #[Computed]
@@ -187,21 +219,38 @@ new #[Title('Vender')] class extends Component
         return is_numeric($this->deliveryFee) ? round(max(0, (float) $this->deliveryFee), 2) : $this->defaultDeliveryFee;
     }
 
-    protected function deliveryError(): ?string
+    /**
+     * Respuesta de error para el cuadro de cobro. $field es el id del campo con el problema:
+     * el navegador lo enfoca para que no haya que buscarlo.
+     *
+     * @return array{ok: false, error: string, field?: string}
+     */
+    protected function fail(string $error, ?string $field = null): array
+    {
+        return $field ? ['ok' => false, 'error' => $error, 'field' => $field] : ['ok' => false, 'error' => $error];
+    }
+
+    protected function deliveryError(): ?array
     {
         return $this->service === 'delivery' && trim((string) $this->address) === ''
-            ? 'Escribe la dirección de entrega.'
+            ? $this->fail('Escribe la dirección de entrega.', 'address')
             : null;
     }
 
     /** Montos escritos a mano que no caben en la base. */
-    protected function amountError(): ?string
+    protected function amountError(): ?array
     {
-        $fields = ['discount' => 'el descuento', 'tip' => 'la propina', 'deliveryFee' => 'el envío', 'received' => 'lo recibido', 'cashPart' => 'el efectivo'];
+        $fields = [
+            'discount' => ['el descuento', 'discount'],
+            'tip' => ['la propina', 'tip'],
+            'deliveryFee' => ['el envío', 'delivery-fee'],
+            'received' => ['lo recibido', 'received'],
+            'cashPart' => ['el efectivo', 'cash-part'],
+        ];
 
-        foreach ($fields as $field => $name) {
-            if (is_numeric($this->{$field}) && (float) $this->{$field} > self::MAX_AMOUNT) {
-                return 'Revisa '.$name.': el monto es demasiado alto.';
+        foreach ($fields as $property => [$name, $id]) {
+            if (is_numeric($this->{$property}) && (float) $this->{$property} > self::MAX_AMOUNT) {
+                return $this->fail('Revisa '.$name.': el monto es demasiado alto.', $id);
             }
         }
 
@@ -209,14 +258,16 @@ new #[Title('Vender')] class extends Component
     }
 
     /** @param  array{items: array, unavailable: array<int, string>, missing: array<int, string>}  $built */
-    protected function linesError(array $built): ?string
+    protected function linesError(array $built): ?array
     {
-        return match (true) {
+        $error = match (true) {
             $built['unavailable'] !== [] => 'Ya no se vende: '.implode(', ', $built['unavailable']).'. Quítalo del pedido.',
             $built['items'] === [] => 'El pedido está vacío.',
             $built['missing'] !== [] => 'Falta elegir: '.implode(', ', $built['missing']).'.',
             default => null,
         };
+
+        return $error ? $this->fail($error) : null;
     }
 
     /** Texto escrito a mano: sin espacios de más y con el largo que cabe en la base. */
@@ -232,7 +283,7 @@ new #[Title('Vender')] class extends Component
     public function toggleSoldOut(int $id): void
     {
         $product = Product::findOrFail($id);
-        $product->update(['sold_out_on' => $product->isSoldOut() ? null : today()]);
+        $product->update(['sold_out_on' => $product->isSoldOut() ? null : BusinessDay::today()]);
         unset($this->products, $this->catalog);
     }
 
@@ -250,7 +301,7 @@ new #[Title('Vender')] class extends Component
 
     protected function feeFor(string $service): float
     {
-        return in_array($service, ['togo', 'delivery'], true) ? $this->packagingFee : 0.0;
+        return in_array($service, ['togo', 'delivery'], true) ? ($this->savedFee ?? $this->packagingFee) : 0.0;
     }
 
     /** Descuento en pesos sobre productos + empaque (nunca más que eso). */
@@ -265,23 +316,6 @@ new #[Title('Vender')] class extends Component
     protected function tipAmount(): float
     {
         return is_numeric($this->tip) ? round(max(0, (float) $this->tip), 2) : 0.0;
-    }
-
-    /** @return array<int, array{method: string, amount: float, reference: ?string}> */
-    protected function paymentsFor(float $due): array
-    {
-        $reference = $this->clip($this->reference, 255);
-
-        if ($this->method !== 'mixed') {
-            return [['method' => $this->method, 'amount' => $due, 'reference' => $this->method === 'cash' ? null : $reference]];
-        }
-
-        $cash = round(min($due, max(0, (float) $this->cashPart)), 2);
-
-        return array_values(array_filter([
-            ['method' => 'cash', 'amount' => $cash, 'reference' => null],
-            ['method' => $this->otherMethod, 'amount' => round($due - $cash, 2), 'reference' => $reference],
-        ], fn ($p) => $p['amount'] > 0));
     }
 
     protected function title(Order $order): string
@@ -304,11 +338,22 @@ new #[Title('Vender')] class extends Component
                     return null;
                 }
             } else {
+                $undone = $this->undoneId ? Order::with('items')->where('status', OrderStatus::Cancelled)->find($this->undoneId) : null;
+
                 $order = new Order([
                     'user_id' => auth()->id(),
                     'daily_number' => $this->dailyNumber ?? Order::nextDailyNumber(),
-                    'sold_at' => now(),
+                    // Con su mismo número conserva su lugar en la cocina y el tiempo que lleva esperando.
+                    'sold_at' => $undone && $this->dailyNumber ? $undone->sold_at : now(),
                 ]);
+
+                // Si lleva lo mismo, la cocina ya lo tenía: no regresa como nuevo si ya estaba listo, en camino o entregado.
+                // Si cambió, la cocina lo ve marcado como cambiado.
+                if ($undone && OrderBuilder::signature($undone->items) === OrderBuilder::signature($built['items'])) {
+                    $order->fill($undone->only(['ready_at', 'dispatched_at', 'delivered_at']));
+                } elseif ($undone) {
+                    $order->changed_at = now();
+                }
             }
 
             // Si cambian los productos de un pedido que ya estaba listo o entregado, vuelve a la cocina.
@@ -337,7 +382,7 @@ new #[Title('Vender')] class extends Component
             ]);
 
             if ($changed) {
-                $order->fill(['ready_at' => null, 'dispatched_at' => null, 'delivered_at' => null]);
+                $order->fill(['ready_at' => null, 'dispatched_at' => null, 'delivered_at' => null, 'changed_at' => now()]);
             }
 
             $order->save();
@@ -345,8 +390,7 @@ new #[Title('Vender')] class extends Component
             OrderBuilder::fill($order, $built);
 
             if ($paid) {
-                $order->payments()->delete();
-                $order->payments()->createMany($this->paymentsFor((float) $order->total + (float) $order->tip));
+                $order->recordPayments($this->method, (float) $this->cashPart, $this->otherMethod, $this->clip($this->reference, 255));
             }
 
             return $order;
@@ -355,11 +399,11 @@ new #[Title('Vender')] class extends Component
 
     protected function finish(): void
     {
-        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime', 'discount', 'tip', 'cashPart', 'address', 'phone', 'addressNotes', 'deliveryFee', 'dailyNumber');
+        $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime', 'discount', 'tip', 'cashPart', 'address', 'phone', 'addressNotes', 'deliveryFee', 'dailyNumber', 'undoneId', 'savedFee', 'correcting');
         $this->method = 'cash';
         $this->discountType = 'amount';
         $this->otherMethod = 'transfer';
-        $this->service = 'togo';
+        $this->service = 'here';
         unset($this->editing);
         $this->dispatch('order-reset');
     }
@@ -373,6 +417,25 @@ new #[Title('Vender')] class extends Component
         return ['ok' => false, 'closed' => true];
     }
 
+    /**
+     * Cambio a dar si se escribió con cuánto pagaron en efectivo. En pago mixto se compara
+     * contra la parte en efectivo; con transferencia o tarjeta no hay cambio.
+     */
+    protected function changeFor(float $due): ?float
+    {
+        $cashDue = match ($this->method) {
+            'cash' => $due,
+            'mixed' => round(min($due, max(0, (float) $this->cashPart)), 2),
+            default => null,
+        };
+
+        if ($cashDue === null || ! is_numeric($this->received)) {
+            return null;
+        }
+
+        return round((float) $this->received - $cashDue, 2);
+    }
+
     /** @return array{ok: bool, error?: string, closed?: bool} */
     public function charge(): array
     {
@@ -382,24 +445,26 @@ new #[Title('Vender')] class extends Component
 
         $built = OrderBuilder::items($this->lines);
 
-        if ($error = $this->linesError($built) ?? $this->deliveryError() ?? $this->amountError()) {
-            return ['ok' => false, 'error' => $error];
+        if ($failure = $this->linesError($built) ?? $this->deliveryError() ?? $this->amountError()) {
+            return $failure;
         }
 
         $base = $built['total'] + $this->feeFor($this->service);
         $due = max(0, $base - $this->discountFor($base)) + $this->deliveryFeeAmount() + $this->tipAmount();
 
-        if ($this->method === 'cash' && is_numeric($this->received) && (float) $this->received < $due) {
-            return ['ok' => false, 'error' => 'El monto recibido no alcanza para el total.'];
-        }
-
         if ($this->method === 'mixed') {
             if (! is_numeric($this->cashPart) || (float) $this->cashPart <= 0 || (float) $this->cashPart >= $due) {
-                return ['ok' => false, 'error' => 'En pago mixto escribe cuánto se paga en efectivo (menos del total).'];
+                return $this->fail('En pago mixto escribe cuánto se paga en efectivo (menos del total).', 'cash-part');
             }
             if (! in_array($this->otherMethod, ['transfer', 'card'], true)) {
                 return ['ok' => false, 'error' => 'Elige con qué se paga el resto.'];
             }
+        }
+
+        if (($this->changeFor($due) ?? 0) < 0) {
+            return $this->fail($this->method === 'mixed'
+                ? 'El efectivo recibido no alcanza para la parte en efectivo.'
+                : 'El monto recibido no alcanza para el total.', 'received');
         }
 
         $order = $this->store(OrderStatus::Paid, $built);
@@ -411,7 +476,9 @@ new #[Title('Vender')] class extends Component
         $this->lastOrderId = $order->id;
         $this->lastTotal = (float) $order->total + (float) $order->tip;
         $this->lastTitle = $this->title($order);
+        $this->lastChange = $this->changeFor($due);
         $this->finish();
+        $this->dispatch('pending-count', count: Order::pendingCount());
 
         return ['ok' => true];
     }
@@ -420,13 +487,13 @@ new #[Title('Vender')] class extends Component
     public function saveOpen(): array
     {
         if (trim((string) $this->label) === '') {
-            return ['ok' => false, 'error' => 'Escribe para quién es (un nombre o el carro) para encontrarlo después.'];
+            return $this->fail('Escribe para quién es (un nombre o el carro) para encontrarlo después.', 'label');
         }
 
         $built = OrderBuilder::items($this->lines);
 
-        if ($error = $this->deliveryError() ?? $this->linesError($built) ?? $this->amountError()) {
-            return ['ok' => false, 'error' => $error];
+        if ($failure = $this->deliveryError() ?? $this->linesError($built) ?? $this->amountError()) {
+            return $failure;
         }
 
         $order = $this->store(OrderStatus::Open, $built);
@@ -436,6 +503,7 @@ new #[Title('Vender')] class extends Component
         }
 
         $this->dispatch('toast', message: 'Pedido '.$this->title($order).' guardado sin cobrar');
+        $this->dispatch('pending-count', count: Order::pendingCount());
         $this->reset('lastOrderId');
         $this->finish();
 
@@ -452,27 +520,37 @@ new #[Title('Vender')] class extends Component
     {
         $order = $this->lastOrderId ? Order::with(['items', 'payments'])->find($this->lastOrderId) : null;
 
-        if ($order && $order->status === OrderStatus::Paid && $order->paid_at?->gt(now()->subMinutes(10))) {
-            $order->update(['status' => OrderStatus::Cancelled]);
-
-            $this->fillFrom($order);
-            $this->tip = (float) $order->tip > 0 ? $this->plain($order->tip) : null;
-            $this->method = $order->payment_method?->value ?? 'cash';
-            $this->reference = $order->payment_reference;
-
-            if ($order->payment_method === PaymentMethod::Mixed) {
-                $this->cashPart = $this->plain($order->payments->firstWhere('method', PaymentMethod::Cash)?->amount ?? 0);
-                $this->otherMethod = $order->payments->first(fn ($p) => $p->method !== PaymentMethod::Cash)?->method->value ?? 'transfer';
-            }
-
-            // El cliente ya tiene su número: se conserva si el pedido es de hoy.
-            $this->dailyNumber = $order->sold_at->isToday() ? $order->daily_number : null;
-
-            $this->dispatch('order-restored', later: (bool) $this->pickupTime, discount: (bool) $this->discount);
-            $this->dispatch('toast', message: 'Venta cancelada. El pedido volvió para corregirlo.');
+        if ($order && $order->status === OrderStatus::Paid && ! $order->paid_at?->gt(now()->subMinutes(self::UNDO_MINUTES))) {
+            $this->dispatch('toast', message: 'Ya pasaron más de '.self::UNDO_MINUTES.' minutos. Corrígela desde Pedidos.', type: 'error');
+        } elseif ($order && $order->status === OrderStatus::Paid) {
+            $this->correct($order);
         }
 
-        $this->reset('lastOrderId', 'lastTotal', 'lastTitle');
+        $this->reset('lastOrderId', 'lastTotal', 'lastTitle', 'lastChange');
+    }
+
+    /** Cancela una venta y regresa el pedido completo (servicio, domicilio, descuento, pago) para corregirlo y volver a cobrarlo. */
+    protected function correct(Order $order): void
+    {
+        $order->cancel(Order::CORRECTION);
+
+        $this->fillFrom($order);
+        $this->tip = (float) $order->tip > 0 ? $this->plain($order->tip) : null;
+        $this->method = $order->payment_method?->value ?? 'cash';
+        $this->reference = $order->payment_reference;
+
+        if ($order->payment_method === PaymentMethod::Mixed) {
+            $this->cashPart = $this->plain($order->payments->firstWhere('method', PaymentMethod::Cash)?->amount ?? 0);
+            $this->otherMethod = $order->payments->first(fn ($p) => $p->method !== PaymentMethod::Cash)?->method->value ?? 'transfer';
+        }
+
+        // El cliente ya tiene su número: se conserva si el pedido es de hoy.
+        $this->dailyNumber = BusinessDay::isCurrent($order->sold_at) ? $order->daily_number : null;
+        $this->undoneId = $order->id;
+
+        $this->dispatch('order-restored', later: (bool) $this->pickupTime, discount: (bool) $this->discount);
+        $this->dispatch('toast', message: 'Venta cancelada. El pedido volvió para corregirlo.');
+        $this->dispatch('pending-count', count: Order::pendingCount());
     }
 };
 ?>
@@ -484,9 +562,9 @@ new #[Title('Vender')] class extends Component
 <div
     data-boot="{{ json_encode(['catalog' => $this->catalog, 'fee' => $this->packagingFee, 'delivery' => $this->defaultDeliveryFee]) }}"
     @order-reset.window="later = false; discOpen = false"
-    {{-- El recorrido abre y cierra el cuadro de cobro para explicarlo. --}}
-    @tour-open.window="if ($event.detail === 'pedido') { error = ''; sheet = true }"
-    @tour-close.window="sheet = false"
+    {{-- El recorrido abre y cierra el cuadro de cobro para explicarlo; si no hay pedido, pone uno de ejemplo mientras tanto. --}}
+    @tour-open.window="if ($event.detail === 'pedido') { error = ''; startTourDemo(); sheet = true }"
+    @tour-close.window="sheet = false; endTourDemo()"
     @order-restored.window="later = $event.detail.later; discOpen = $event.detail.discount; $nextTick(() => saveDraft())"
     x-data="{
         catalog: {},
@@ -508,7 +586,8 @@ new #[Title('Vender')] class extends Component
             this.later = !! $wire.pickupTime;
             this.discOpen = !! $wire.discount;
             this.sheet = $wire.openPay;
-            if (new URLSearchParams(location.search).has('cobrar')) { const u = new URL(location.href); u.searchParams.delete('cobrar'); history.replaceState(history.state, '', u) }
+            if ($wire.orderId) this.editSnapshot = this.snapshot();
+            if ($wire.correcting) { this.stashDraft(); this.saveDraft() }
             this.restoreDraft();
             // Si la tablet estuvo dormida o pasó un rato, se traen precios y agotados al día.
             this.onVisible = () => document.visibilityState === 'visible' && this.refresh();
@@ -533,9 +612,21 @@ new #[Title('Vender')] class extends Component
         openSheet() { this.error = ''; this.sheet = true; this.refresh() },
         // Borrador del pedido en este equipo: sobrevive a una recarga o a salir de Vender sin cobrar.
         draftKey: 'vender:borrador',
-        draftFields: ['label', 'service', 'address', 'phone', 'addressNotes', 'deliveryFee', 'pickupTime', 'discount', 'discountType', 'dailyNumber'],
+        draftFields: ['label', 'service', 'address', 'phone', 'addressNotes', 'deliveryFee', 'pickupTime', 'discount', 'discountType', 'dailyNumber', 'undoneId'],
+        tourDemo: false,
+        startTourDemo() {
+            const sample = Object.values(this.catalog).find(p => ! p.soldOut && ! this.needsChoice(p.id));
+            if (this.count() || ! sample) return;
+            this.tourDemo = true;
+            $wire.lines = [{ product_id: sample.id, qty: 2, without: [], extras: [], choices: [], notes: '' }];
+        },
+        endTourDemo() {
+            if (! this.tourDemo) return;
+            this.tourDemo = false;
+            $wire.lines = [];
+        },
         saveDraft() {
-            if ($wire.orderId) return;
+            if ($wire.orderId || this.tourDemo) return;
             try {
                 if (! this.count()) return localStorage.removeItem(this.draftKey);
                 const d = { lines: this.list(), at: Date.now() };
@@ -544,7 +635,23 @@ new #[Title('Vender')] class extends Component
             } catch (e) {}
         },
         clearDraft() { try { localStorage.removeItem(this.draftKey) } catch (e) {} },
-        restoreDraft() {
+        // Al corregir una venta, el pedido que se estaba armando se aparta y vuelve al terminar.
+        stashKey: 'vender:apartado',
+        stashDraft() {
+            try {
+                const d = localStorage.getItem(this.draftKey);
+                if (d) localStorage.setItem(this.stashKey, d);
+            } catch (e) {}
+        },
+        unstashDraft() {
+            let d = null;
+            try { d = localStorage.getItem(this.stashKey); localStorage.removeItem(this.stashKey) } catch (e) {}
+            if (! d) return;
+            try { localStorage.setItem(this.draftKey, d) } catch (e) {}
+            this.$nextTick(() => this.restoreDraft('Volvió el pedido que estabas armando.'));
+        },
+        // Sin mensaje propio, el aviso sale solo la primera vez que se abre la app (tras recargar o volver a entrar), no en cada visita a Vender.
+        restoreDraft(message = null) {
             if ($wire.orderId || this.count()) return;
             let d = null;
             try { d = JSON.parse(localStorage.getItem(this.draftKey)) } catch (e) {}
@@ -555,7 +662,9 @@ new #[Title('Vender')] class extends Component
             this.draftFields.forEach(k => { if (d[k] !== undefined) $wire[k] = d[k] });
             this.later = !! d.pickupTime;
             this.discOpen = !! d.discount;
-            setTimeout(() => this.$dispatch('toast', { message: 'Se recuperó el pedido que no se había cobrado.' }), 300);
+            const notice = message ?? (window.draftNoticeShown ? null : 'Se recuperó el pedido que no se había cobrado.');
+            window.draftNoticeShown = true;
+            if (notice) setTimeout(() => this.$dispatch('toast', { message: notice }), 300);
         },
         // Renglones del pedido: viven en $wire.lines (se mandan al servidor solo al cobrar o guardar).
         list() { return Array.isArray($wire.lines) ? $wire.lines : Object.values($wire.lines ?? {}) },
@@ -597,6 +706,15 @@ new #[Title('Vender')] class extends Component
             this.saveDraft();
             this.$nextTick(() => bump(document.getElementById('q-' + pid)));
         },
+        setQty(i, value) {
+            const qty = Math.min(999, Math.max(0, Math.floor(Number(value) || 0)));
+            const lines = this.list().map(l => ({ ...l }));
+            if (! lines[i]) return;
+            qty === 0 ? lines.splice(i, 1) : lines[i].qty = qty;
+            $wire.lines = lines;
+            if (! lines.length) this.emptied();
+            this.saveDraft();
+        },
         removeLine(i) {
             const lines = this.list().map(l => ({ ...l }));
             lines.splice(i, 1);
@@ -605,7 +723,7 @@ new #[Title('Vender')] class extends Component
             this.saveDraft();
         },
         // Sin productos ya no es la venta que se deshizo: el siguiente pedido lleva número nuevo.
-        emptied() { this.sheet = false; $wire.dailyNumber = null },
+        emptied() { this.sheet = false; $wire.dailyNumber = null; $wire.undoneId = null },
         unit(l) {
             if (l.courtesy) return 0;
             const p = this.catalog[l.product_id];
@@ -623,7 +741,7 @@ new #[Title('Vender')] class extends Component
             };
         },
         count() { return this.list().reduce((n, l) => n + l.qty, 0) },
-        packaging() { return ['togo', 'delivery'].includes($wire.service) ? this.fee : 0 },
+        packaging() { return ['togo', 'delivery'].includes($wire.service) ? ($wire.savedFee ?? this.fee) : 0 },
         shipping() {
             if ($wire.service !== 'delivery' || ! this.count()) return 0;
             const v = $wire.deliveryFee;
@@ -638,13 +756,29 @@ new #[Title('Vender')] class extends Component
         total() { return this.r2(Math.max(0, this.subtotal() - this.discountAmt()) + this.shipping()) },
         tipAmt() { return this.r2(Math.max(0, Number($wire.tip) || 0)) },
         due() { return this.r2(this.total() + this.tipAmt()) },
-        setTip(pct) { $wire.tip = pct === null ? null : String(this.r2((this.total() - this.shipping()) * pct / 100)) },
+        // Propina sugerida en pesos cerrados: los centavos estorban al dar cambio.
+        tipFor(pct) { return Math.round((this.total() - this.shipping()) * pct / 100) },
+        setTip(pct) { $wire.tip = pct === null ? null : String(this.tipFor(pct)) },
+        // Lo que se paga en efectivo: todo, o en pago mixto solo la parte en efectivo.
+        cashDue() {
+            if ($wire.method === 'cash') return this.due();
+            if ($wire.method === 'mixed') return this.r2(Math.min(this.due(), Math.max(0, Number($wire.cashPart) || 0)));
+            return 0;
+        },
         change() {
             const r = $wire.received;
-            if ($wire.method !== 'cash' || r === null || r === '' || isNaN(r)) return null;
-            return this.r2(Number(r) - this.due());
+            if (! this.cashDue() || r === null || r === '' || isNaN(r)) return null;
+            return this.r2(Number(r) - this.cashDue());
         },
-        quick() { return [50, 100, 200, 500, 1000].filter(b => b > this.due()).slice(0, 3) },
+        // Con cuánto suelen pagar: el total redondeado hacia arriba con cada billete ($139 se paga con $140, $150 o $200)
+        // y siempre el de $500, el billete grande con el que más pagan. Sin billetes de $1,000: nadie llega con uno a una taquería.
+        quick() {
+            const due = this.cashDue();
+            const near = [20, 50, 100, 200, 500].map(b => Math.ceil(due / b) * b).filter(a => a > due);
+            const amounts = [...new Set(near)].sort((a, b) => a - b).slice(0, 3);
+            if (due < 500 && ! amounts.includes(500)) amounts.push(500);
+            return amounts;
+        },
         rest() { return this.r2(Math.max(0, this.due() - (Number($wire.cashPart) || 0))) },
         // Editor de indicaciones de un renglón
         edit(i) {
@@ -686,32 +820,68 @@ new #[Title('Vender')] class extends Component
             this.editor = null;
             if (e.isNew) { navigator.vibrate?.(8); this.$nextTick(() => bump(document.getElementById('q-' + pid))) }
         },
-        clear() { $wire.lines = []; $wire.received = null; $wire.reference = null; this.emptied(); this.clearDraft() },
+        clear() { $wire.lines = []; $wire.received = null; $wire.reference = null; this.emptied(); this.clearDraft(); this.unstashDraft() },
         async confirmClear() {
             if (await this.$store.confirm.ask({ title: '¿Vaciar el pedido?', message: 'Se quitarán ' + this.count() + (this.count() === 1 ? ' producto.' : ' productos.'), action: 'Vaciar' })) this.clear();
         },
+        // Lleva la vista al campo con el problema: el aviso sale en el pie y el campo puede estar fuera de vista.
+        focusField(id) {
+            this.$nextTick(() => {
+                const el = document.getElementById(id);
+                el?.focus({ preventScroll: true });
+                el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            });
+        },
         async submit(action) {
             if (this.busy) return;
-            this.busy = true; this.error = '';
+            this.error = '';
+            if (this.later && ! $wire.pickupTime) {
+                this.error = 'Elige la hora en que lo recogen.';
+                return this.focusField('pickup');
+            }
+            this.busy = true;
             const editing = !! $wire.orderId;
             try {
                 const r = await $wire[action]();
                 if (r?.ok) {
                     this.sheet = false;
-                    if (! editing) this.clearDraft();
+                    if (editing) {
+                        this.restoreDraft('Volvió el pedido que estabas armando.');
+                    } else {
+                        this.clearDraft();
+                        this.unstashDraft();
+                    }
                     this.refresh();
                 } else if (r?.closed) {
                     this.sheet = false;
+                    if (editing) this.restoreDraft('Volvió el pedido que estabas armando.');
                 } else {
                     this.error = r?.error ?? 'No se pudo guardar.';
+                    if (r?.field) this.focusField(r.field);
                 }
+            } catch (e) {
+                this.error = 'Sin conexión. Revisa tu internet e intenta de nuevo.';
             } finally { this.busy = false }
+        },
+        // Pedido guardado que se está editando: si se sale con cambios, se pregunta antes de perderlos.
+        editSnapshot: null,
+        snapshot() {
+            const ids = (x) => [...(x ?? [])].map(Number).sort();
+            return JSON.stringify([
+                this.list().map(l => [Number(l.product_id), l.qty, ids(l.without), ids(l.extras), ids(l.choices), !! l.courtesy, (l.notes ?? '').trim()]),
+                this.draftFields.map(k => $wire[k] ?? null),
+            ]);
+        },
+        async leaveEdit() {
+            if (this.snapshot() !== this.editSnapshot && ! await this.$store.confirm.ask({ title: '¿Salir sin guardar?', message: 'Se perderán los cambios a este pedido.', action: 'Salir sin guardar', cancel: 'Seguir editando' })) return;
+            await $wire.cancelEdit();
+            this.restoreDraft('Volvió el pedido que estabas armando.');
         },
     }">
     <x-page-header :title="$this->editing ? 'Pedido #'.$this->editing->daily_number : 'Vender'" tour="vender">
         <x-slot:actions>
             @if ($this->editing)
-                <button type="button" wire:click="cancelEdit" class="btn">Salir</button>
+                <button type="button" @click="leaveEdit()" class="btn">Salir</button>
             @else
                 <button type="button" @click="stock = ! stock" data-tour="agotados" class="btn" :class="stock && '!bg-ink !text-bg !border-ink'">
                     <x-icon name="eye-off" class="size-4" /> <span x-show="! stock">Agotados</span><span x-show="stock" x-cloak>Listo</span>
@@ -736,7 +906,11 @@ new #[Title('Vender')] class extends Component
         @endif
     </x-page-header>
 
-    <div class="md:grid md:grid-cols-[1fr_20rem] md:items-start md:gap-6 lg:grid-cols-[1fr_23rem]">
+    {{--
+        El panel del pedido va al lado desde 1024 px. En tablet vertical (768) con la barra lateral no queda espacio:
+        ahí se usa la misma barra "Ver pedido" del celular y las tarjetas van de tres en tres.
+    --}}
+    <div class="md:pb-20 lg:grid lg:grid-cols-[1fr_20rem] lg:items-start lg:gap-6 lg:pb-0 xl:grid-cols-[1fr_23rem]">
         <div>
             @if ($this->products->isEmpty())
                 <x-empty icon="tag" title="Aún no hay productos">
@@ -747,7 +921,7 @@ new #[Title('Vender')] class extends Component
                 </x-empty>
             @else
                 {{-- Tarjetas blancas y tranquilas; las que ya llevan piezas se pintan de amarillo. --}}
-                <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">
+                <div class="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
                     @foreach ($this->products as $product)
                         <div wire:key="p-{{ $product->id }}" @if ($loop->first) data-tour="producto" @endif
                              x-show="category === '' || category === @js($product->category)"
@@ -783,7 +957,7 @@ new #[Title('Vender')] class extends Component
         </div>
 
         {{-- Pedido (escritorio). Lo maneja el navegador. --}}
-        <aside class="sticky top-6 hidden md:block" aria-label="Pedido actual" wire:ignore data-tour="pedido-panel">
+        <aside class="sticky top-6 hidden lg:block" aria-label="Pedido actual" wire:ignore data-tour="pedido-panel">
             <div class="card space-y-3 !p-5">
                 <div class="flex items-center justify-between">
                     <h2 class="section-title">Pedido</h2>
@@ -810,7 +984,7 @@ new #[Title('Vender')] class extends Component
         <div x-show="count() > 0" x-cloak
              x-transition:enter="transition duration-200 ease-out" x-transition:enter-start="translate-y-4 opacity-0"
              x-transition:leave="transition duration-150 ease-in" x-transition:leave-end="translate-y-4 opacity-0"
-             class="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 md:hidden">
+             class="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 md:right-5 md:bottom-5 md:left-[calc(15.5rem+1.25rem)] lg:hidden">
             <button type="button" @click="openSheet()"
                     class="flex w-full touch-manipulation items-center gap-3 rounded-2xl bg-chile py-3 pr-4 pl-3 text-left text-white shadow-[0_10px_30px_-8px_rgb(224_36_36/0.6)] motion-safe:transition motion-safe:active:scale-[0.98]">
                 <span class="num grid size-11 place-items-center rounded-xl bg-white/18 text-2xl font-bold" x-text="count()"></span>
@@ -822,8 +996,13 @@ new #[Title('Vender')] class extends Component
 
     {{-- Venta registrada (la pinta el servidor después de cobrar) --}}
     @if ($lastOrderId)
-        {{-- Se quita sola a los 10 s o en cuanto empieza otro pedido: tapaba la barra del pedido nuevo. --}}
+        {{--
+            Sale unos segundos para deshacer un error al cobrar; después se corrige desde Pedidos.
+            Se quita antes si empieza otro pedido: tapaba la barra del pedido nuevo.
+        --}}
+        {{-- Tocarlo fuera de Deshacer lo cierra, por si tapa algo. --}}
         <div wire:key="done-{{ $lastOrderId }}" x-data="{ show: true }" x-init="setTimeout(() => show = false, 10000)" x-effect="if (count() > 0) show = false" x-show="show" x-cloak
+             @click="if (! $event.target.closest('[data-undo]')) show = false"
              x-transition:leave="transition duration-200" x-transition:leave-end="opacity-0 translate-y-3"
              class="sheet-in fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex items-center gap-3 rounded-2xl bg-ink py-3 pr-3 pl-4 text-bg shadow-xl md:inset-x-auto md:right-6 md:bottom-6 md:w-96"
              role="status">
@@ -831,9 +1010,15 @@ new #[Title('Vender')] class extends Component
             <span class="min-w-0 flex-1 leading-tight">
                 <span class="block truncate text-sm opacity-75">Cobrado {{ $lastTitle }}</span>
                 <span class="num block text-2xl font-bold">{{ money($lastTotal) }}</span>
+                @if ($lastChange > 0)
+                    <span class="block text-sm font-semibold text-salsa-soft">Cambio <span class="num text-base">{{ money($lastChange) }}</span></span>
+                @endif
             </span>
-            <button type="button" wire:click="undo" class="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-bg/12 px-3.5 text-sm font-semibold hover:bg-bg/20">
+            <button type="button" wire:click="undo" data-undo class="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-bg/12 px-3.5 text-sm font-semibold hover:bg-bg/20">
                 <x-icon name="undo" class="size-4" /> Deshacer
+            </button>
+            <button type="button" class="-ml-1 grid size-9 shrink-0 place-items-center rounded-lg opacity-60 hover:opacity-100" aria-label="Cerrar aviso">
+                <x-icon name="x" class="size-4" />
             </button>
         </div>
     @endif
@@ -841,7 +1026,7 @@ new #[Title('Vender')] class extends Component
     {{-- Pedido: nombre, renglones y forma de pago --}}
     <div wire:ignore>
         <x-sheet title="Pedido" open="sheet">
-            <div class="space-y-5" @input.debounce.400ms="saveDraft()" @click="$nextTick(() => saveDraft())">
+            <div class="space-y-5" @input="error = ''" @input.debounce.400ms="saveDraft()" @click="error = ''; $nextTick(() => saveDraft())">
                 <div data-tour="para-quien">
                     <label class="label" for="label">¿Para quién? <span class="font-normal text-muted">(opcional al cobrar)</span></label>
                     <input id="label" type="text" x-model="$wire.label" maxlength="60" class="input" placeholder="Ej. camioneta negra, Juan, mesa 2" autocomplete="off">
@@ -880,7 +1065,8 @@ new #[Title('Vender')] class extends Component
                         <p class="label">¿Cuándo?</p>
                         <div class="segmented" role="group" aria-label="Cuándo">
                             <button type="button" @click="later = false; $wire.pickupTime = null" :aria-pressed="! later">Ahora</button>
-                            <button type="button" @click="later = true; $nextTick(() => $refs.pickup?.focus())" :aria-pressed="later">Más tarde</button>
+                            {{-- Quien recoge después se lleva el pedido: "Aquí" no tiene sentido con una hora de recogida. --}}
+                            <button type="button" @click="later = true; if ($wire.service === 'here') $wire.service = 'togo'; $nextTick(() => $refs.pickup?.focus())" :aria-pressed="later">Más tarde</button>
                         </div>
                     </div>
                 </div>
@@ -896,7 +1082,7 @@ new #[Title('Vender')] class extends Component
                     </div>
                     @include('partials.order-lines')
                     {{-- En el celular, Vaciar vive aquí: en el encabezado no cabe junto al título en pantallas angostas. --}}
-                    <button type="button" @click="confirmClear()" class="btn-quiet-danger -ml-2.5 mt-1 md:hidden"><x-icon name="trash" class="size-4" /> Vaciar pedido</button>
+                    <button type="button" @click="confirmClear()" class="btn-quiet-danger -ml-2.5 mt-1 lg:hidden"><x-icon name="trash" class="size-4" /> Vaciar pedido</button>
                 </div>
 
                 {{-- Desglose --}}
@@ -929,7 +1115,7 @@ new #[Title('Vender')] class extends Component
                     <div x-show="discOpen" x-cloak>
                         <p class="label">Descuento</p>
                         <div class="flex gap-2">
-                            <input x-ref="disc" type="number" inputmode="decimal" min="0" step="0.01" x-model="$wire.discount" class="input num flex-1 text-xl font-semibold" placeholder="0">
+                            <input x-ref="disc" id="discount" type="number" inputmode="decimal" min="0" step="0.01" x-model="$wire.discount" class="input num flex-1 text-xl font-semibold" placeholder="0">
                             <div class="segmented w-28 shrink-0" role="group" aria-label="Tipo de descuento">
                                 <button type="button" @click="$wire.discountType = 'amount'" :aria-pressed="$wire.discountType === 'amount'">$</button>
                                 <button type="button" @click="$wire.discountType = 'percent'" :aria-pressed="$wire.discountType === 'percent'">%</button>
@@ -954,28 +1140,12 @@ new #[Title('Vender')] class extends Component
                     <p class="label">Propina <span class="font-normal text-muted">(no cuenta como venta)</span></p>
                     <div class="flex flex-wrap items-center gap-2">
                         <button type="button" class="chip" :aria-pressed="tipAmt() === 0" @click="setTip(null)">Sin propina</button>
-                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2((total() - shipping()) * 0.10)" @click="setTip(10)">10%</button>
-                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === r2((total() - shipping()) * 0.15)" @click="setTip(15)">15%</button>
+                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === tipFor(10)" @click="setTip(10)">10%</button>
+                        <button type="button" class="chip" :aria-pressed="tipAmt() > 0 && tipAmt() === tipFor(15)" @click="setTip(15)">15%</button>
                         <div class="relative w-28">
                             <span class="num pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 font-semibold text-muted">$</span>
-                            <input type="number" inputmode="decimal" min="0" step="0.5" x-model="$wire.tip" class="input num !min-h-9 !py-1 !pl-7 text-base font-semibold" placeholder="Otra" aria-label="Otra propina">
+                            <input id="tip" type="number" inputmode="decimal" min="0" step="0.5" x-model="$wire.tip" class="input num !min-h-9 !py-1 !pl-7 text-base font-semibold" placeholder="Otra" aria-label="Otra propina">
                         </div>
-                    </div>
-                </div>
-
-                <div x-show="$wire.method === 'cash'" class="space-y-2.5">
-                    <p class="label !mb-0">Recibido</p>
-                    <div class="flex flex-wrap gap-2">
-                        <button type="button" class="chip" :aria-pressed="$wire.received !== null && Number($wire.received) === due()" @click="$wire.received = String(due())">Exacto</button>
-                        <template x-for="amount in quick()" :key="amount">
-                            <button type="button" class="chip num !text-base" :aria-pressed="Number($wire.received) === amount" @click="$wire.received = String(amount)" x-text="'$' + amount"></button>
-                        </template>
-                    </div>
-                    <x-money-input x-model="$wire.received" placeholder="Otro monto" aria-label="Monto recibido" />
-                    <div x-show="change() !== null" x-cloak class="flex items-center justify-between rounded-xl px-4 py-3"
-                         :class="change() >= 0 ? 'bg-salsa-soft text-salsa' : 'bg-chile-soft text-chile'">
-                        <span class="text-sm font-bold" x-text="change() >= 0 ? 'Cambio' : 'Faltan'"></span>
-                        <span class="num text-[2.5rem] leading-none font-bold" x-text="fmt(Math.abs(change() ?? 0))"></span>
                     </div>
                 </div>
 
@@ -993,10 +1163,30 @@ new #[Title('Vender')] class extends Component
                             </div>
                         </div>
                     </div>
+                    <p x-show="Number($wire.cashPart) >= due()" x-cloak class="text-sm font-semibold text-chile">El efectivo tiene que ser menos que el total. Si paga todo en efectivo, elige Efectivo.</p>
                     <p class="flex justify-between rounded-xl bg-sunken px-4 py-2.5 text-[15px]">
                         <span class="text-muted" x-text="($wire.otherMethod === 'card' ? 'Con tarjeta' : 'Por transferencia')"></span>
                         <span class="num text-xl font-bold" x-text="fmt(rest())"></span>
                     </p>
+                </div>
+
+                {{-- Con cuánto pagan en efectivo y el cambio; en pago mixto, contra la parte en efectivo. --}}
+                <div x-show="$wire.method === 'cash' || ($wire.method === 'mixed' && cashDue() > 0 && cashDue() < due())" class="space-y-2.5">
+                    <p class="label !mb-0" x-text="$wire.method === 'mixed' ? 'Recibido en efectivo' : 'Recibido'">Recibido</p>
+                    {{-- Cinco columnas iguales: Exacto y hasta cuatro montos caben en una fila aun en celulares chicos. --}}
+                    <div class="grid grid-cols-[1.25fr_repeat(4,1fr)] gap-1.5">
+                        <button type="button" class="chip justify-center !px-0" :aria-pressed="$wire.received !== null && Number($wire.received) === cashDue()" @click="$wire.received = String(cashDue())">Exacto</button>
+                        <template x-for="amount in quick()" :key="amount">
+                            <button type="button" class="chip num justify-center !px-0 !text-base" :aria-pressed="Number($wire.received) === amount" @click="$wire.received = String(amount)" x-text="'$' + amount"></button>
+                        </template>
+                    </div>
+                    <x-money-input id="received" x-model="$wire.received" placeholder="Otro monto" aria-label="Monto recibido" />
+                    {{-- Al escribir lo recibido, el cambio se deja ver: abajo lo tapaba el pie del cuadro. --}}
+                    <div x-show="change() !== null" x-cloak x-effect="if (change() !== null) $nextTick(() => $el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))" class="flex items-center justify-between rounded-xl px-4 py-3"
+                         :class="change() >= 0 ? 'bg-salsa-soft text-salsa' : 'bg-chile-soft text-chile'">
+                        <span class="text-sm font-bold" x-text="change() >= 0 ? 'Cambio' : 'Faltan'"></span>
+                        <span class="num text-[2.5rem] leading-none font-bold" x-text="fmt(Math.abs(change() ?? 0))"></span>
+                    </div>
                 </div>
 
                 <div x-show="$wire.method !== 'cash'" x-cloak>

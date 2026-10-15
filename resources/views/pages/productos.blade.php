@@ -3,6 +3,7 @@
 use App\Models\Ingredient;
 use App\Models\Product;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -166,7 +167,7 @@ new #[Title('Productos')] class extends Component
             ->filter(fn ($g) => $g['name'] !== '' && $g['choices'])
             ->values()->all();
 
-        $this->category = trim((string) $this->category) ?: null;
+        $this->category = $this->matchingCategory(trim((string) $this->category)) ?: null;
 
         $data = $this->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -221,6 +222,15 @@ new #[Title('Productos')] class extends Component
         $this->resetForm();
         unset($this->products, $this->categories);
         $this->dispatch('toast', message: 'Producto guardado');
+    }
+
+    /** "tacos" se guarda como "Tacos" si esa categoría ya existe, para no tener dos iguales en Vender. */
+    protected function matchingCategory(string $category): string
+    {
+        $normalize = fn (string $text) => Str::lower(Str::ascii($text));
+
+        return Product::whereNotNull('category')->when($this->editingId, fn ($q) => $q->whereKeyNot($this->editingId))->distinct()->pluck('category')
+            ->first(fn (string $existing) => $normalize($existing) === $normalize($category)) ?? $category;
     }
 
     /**
@@ -444,7 +454,7 @@ new #[Title('Productos')] class extends Component
                     <label class="label" for="category">Categoría</label>
                     <input id="category" type="text" list="categories" wire:model="category" class="input" maxlength="255" placeholder="Tacos">
                     <datalist id="categories">
-                        @foreach ($this->categories as $c) <option value="{{ $c }}"> @endforeach
+                        @foreach ($this->categories as $c) <option value="{{ $c }}"></option> @endforeach
                     </datalist>
                     @error('category') <p class="error">{{ $message }}</p> @enderror
                 </div>

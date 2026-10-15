@@ -1,9 +1,13 @@
 {{-- Renglones del pedido. Se usa dentro del x-data de Vender. --}}
 <ul class="divide-y divide-line">
     <template x-for="(line, i) in list()" :key="i + '-' + line.product_id + '-' + line.qty + '-' + (line.choices ?? []).join('.') + '-' + (line.without ?? []).join('.') + '-' + (line.extras ?? []).join('.') + '-' + (line.notes ?? '')">
-        <li>
-            <button type="button" @click="edit(i)" class="flex w-full items-start gap-3 py-2.5 text-left">
-                <span class="num w-7 shrink-0 text-2xl leading-none" x-text="line.qty"></span>
+        <li class="flex items-start gap-2">
+            {{-- La cantidad se escribe directo: 15 tacos no deberían ser 15 toques. En 0 se quita el renglón. --}}
+            <input type="number" inputmode="numeric" min="0" max="999" :value="line.qty"
+                   @change="setQty(i, $event.target.value)" @focus="$event.target.select()" @keydown.enter.prevent="$event.target.blur()"
+                   class="num mt-1.5 h-10 w-12 shrink-0 rounded-lg border border-line bg-surface text-center text-xl leading-none focus:border-ink focus:outline-none"
+                   :aria-label="'Cantidad de ' + (catalog[line.product_id]?.name ?? 'producto')">
+            <button type="button" @click="edit(i)" class="flex min-w-0 flex-1 items-start gap-3 py-2.5 text-left">
                 <span class="min-w-0 flex-1">
                     <span class="block text-[15px] font-semibold" :class="! catalog[line.product_id] && 'text-chile'" x-text="catalog[line.product_id]?.name ?? 'Ya no está a la venta'"></span>
                     <span class="mt-0.5 flex flex-wrap gap-1">

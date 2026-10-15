@@ -3,9 +3,10 @@
 use App\Enums\OrderStatus;
 use App\Models\CashClose;
 use App\Models\CashMovement;
-use App\Models\OrderPayment;
 use App\Models\Expense;
 use App\Models\Order;
+use App\Models\OrderPayment;
+use App\Support\BusinessDay;
 use Carbon\CarbonImmutable;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -20,6 +21,9 @@ new #[Title('Corte de caja')] class extends Component
     public ?string $counted = null;
 
     public ?string $notes = null;
+
+    /** Lo que se queda en la caja al cerrar: es el fondo inicial del día siguiente. Vacío, el mismo fondo de hoy. */
+    public ?string $kept = null;
 
     /** Totales del día; el navegador los usa para calcular al instante. */
     public float $cashSales = 0;
@@ -45,7 +49,7 @@ new #[Title('Corte de caja')] class extends Component
 
     public function mount(): void
     {
-        $this->date = today()->toDateString();
+        $this->date = BusinessDay::today()->toDateString();
         $this->loadClose();
     }
 
@@ -65,12 +69,16 @@ new #[Title('Corte de caja')] class extends Component
         if ($saved) {
             $this->opening = $this->plain($saved->opening);
             $this->counted = $this->plain($saved->counted);
+            $this->kept = $saved->kept !== null ? $this->plain($saved->kept) : null;
             $this->notes = $saved->notes;
 
             return;
         }
 
-        $this->opening = $this->plain(CashClose::whereDate('closed_on', '<', $this->day())->orderByDesc('closed_on')->value('counted') ?? 0);
+        // El fondo es lo que se dejó en la caja al cerrar el día anterior; los cortes viejos no lo tienen y usan todo lo contado.
+        $previous = CashClose::whereDate('closed_on', '<', $this->day())->orderByDesc('closed_on')->first();
+        $this->opening = $this->plain($previous?->kept ?? $previous?->counted ?? 0);
+        $this->kept = null;
         $this->counted = null;
         $this->notes = null;
     }
@@ -87,7 +95,7 @@ new #[Title('Corte de caja')] class extends Component
         try {
             return CarbonImmutable::parse($this->date)->startOfDay();
         } catch (Throwable) {
-            return CarbonImmutable::today();
+            return BusinessDay::today();
         }
     }
 
@@ -97,8 +105,8 @@ new #[Title('Corte de caja')] class extends Component
         $day = $this->day();
 
         return match (true) {
-            $day->isToday() => 'Hoy',
-            $day->isYesterday() => 'Ayer',
+            $day->equalTo(BusinessDay::today()) => 'Hoy',
+            $day->equalTo(BusinessDay::today()->subDay()) => 'Ayer',
             default => ucfirst($day->translatedFormat('l')),
         };
     }
@@ -112,7 +120,7 @@ new #[Title('Corte de caja')] class extends Component
     protected function loadTotals(): void
     {
         $day = $this->day();
-        $range = [$day, $day->endOfDay()];
+        $range = [BusinessDay::start($day), BusinessDay::end($day)];
 
         // Pagos de órdenes pagadas, por el día en que se cobraron.
         $payments = OrderPayment::whereBetween('created_at', $range)
@@ -138,7 +146,7 @@ new #[Title('Corte de caja')] class extends Component
     {
         $day = $this->day();
 
-        return CashMovement::whereBetween('moved_at', [$day, $day->endOfDay()])->orderBy('moved_at')->get();
+        return CashMovement::whereBetween('moved_at', [BusinessDay::start($day), BusinessDay::end($day)])->orderBy('moved_at')->get();
     }
 
     public function addMovement(): void
@@ -155,7 +163,7 @@ new #[Title('Corte de caja')] class extends Component
             'type' => $this->moveType,
             'amount' => $this->moveAmount,
             'reason' => $this->moveReason ?: null,
-            'moved_at' => $day->isToday() ? now() : $day->setTime(23, 59),
+            'moved_at' => $day->equalTo(BusinessDay::today()) ? now() : BusinessDay::end($day)->subMinute(),
         ]);
 
         $this->reset('moveAmount', 'moveReason');
@@ -184,10 +192,29 @@ new #[Title('Corte de caja')] class extends Component
         return is_numeric($this->counted) ? round((float) $this->counted - $this->expected, 2) : null;
     }
 
+    /** Ventas cobradas y luego canceladas ese día (sin contar las que se corrigieron y se volvieron a cobrar). */
+    #[Computed]
+    public function cancelled()
+    {
+        return Order::where('status', OrderStatus::Cancelled)
+            ->whereNotNull('paid_at')
+            ->where(fn ($q) => $q->whereNull('cancel_reason')->orWhere('cancel_reason', '!=', Order::CORRECTION))
+            ->countedBetween(BusinessDay::start($this->day()), BusinessDay::end($this->day()))
+            ->get(['id', 'total']);
+    }
+
+    /** Los cortes de antes del día que se está viendo. */
     #[Computed]
     public function history()
     {
-        return CashClose::orderByDesc('closed_on')->limit(7)->get();
+        return CashClose::whereDate('closed_on', '<', $this->day())->orderByDesc('closed_on')->limit(7)->get();
+    }
+
+    /** El corte guardado ya no coincide: después hubo ventas, cancelaciones, gastos o movimientos. */
+    #[Computed]
+    public function savedIsStale(): bool
+    {
+        return $this->saved && abs((float) $this->saved->expected - $this->expected) >= 0.005;
     }
 
     public function save(): void
@@ -195,8 +222,11 @@ new #[Title('Corte de caja')] class extends Component
         $this->validate([
             'opening' => ['required', 'numeric', 'min:0', 'max:9999999'],
             'counted' => ['required', 'numeric', 'min:0', 'max:9999999'],
+            'kept' => ['nullable', 'numeric', 'min:0', 'lte:counted'],
             'notes' => ['nullable', 'string', 'max:255'],
-        ], attributes: ['opening' => 'fondo inicial', 'counted' => 'efectivo contado']);
+        ], [
+            'kept.lte' => 'No puede quedarse más de lo que contaste.',
+        ], ['opening' => 'fondo inicial', 'counted' => 'efectivo contado', 'kept' => 'fondo para mañana']);
 
         // Los totales se cargaron al abrir la página: se recalculan para guardar el esperado de este momento.
         $this->loadTotals();
@@ -209,6 +239,7 @@ new #[Title('Corte de caja')] class extends Component
             'opening' => $this->opening,
             'expected' => $this->expected,
             'counted' => $this->counted,
+            'kept' => is_numeric($this->kept) ? $this->kept : min((float) $this->opening, (float) $this->counted),
             'difference' => $this->difference,
             'notes' => $this->notes ?: null,
         ])->save();
@@ -223,6 +254,12 @@ new #[Title('Corte de caja')] class extends Component
         get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales + $wire.movementsNet - $wire.cashExpenses) * 100) / 100 },
         moveOpen: false,
         moveError: '',
+        get takeHome() {
+            const counted = Number($wire.counted);
+            const kept = $wire.kept === null || $wire.kept === '' ? Math.min(Number($wire.opening) || 0, counted) : Number($wire.kept);
+            if ($wire.counted === null || $wire.counted === '' || isNaN(counted) || kept > counted) return null;
+            return Math.round((counted - kept) * 100) / 100;
+        },
         get diff() {
             if ($wire.counted === null || $wire.counted === '' || isNaN($wire.counted)) return null;
             return Math.round((Number($wire.counted) - this.expected) * 100) / 100;
@@ -234,7 +271,7 @@ new #[Title('Corte de caja')] class extends Component
         },
      }">
     <x-page-header title="Corte de caja" tour="corte">
-        <x-date-nav :max="today()->toDateString()" />
+        <x-date-nav :max="BusinessDay::today()->toDateString()" />
     </x-page-header>
 
     <div class="mx-auto max-w-xl space-y-4">
@@ -269,7 +306,13 @@ new #[Title('Corte de caja')] class extends Component
             @error('opening') <p class="error px-4 pb-3">{{ $message }}</p> @enderror
         </section>
 
-        @php $unpaid = \App\Models\Order::where('status', \App\Enums\OrderStatus::Open)->get(['total']); @endphp
+        <p x-show="expected < 0" x-cloak role="alert" class="flex gap-2 rounded-2xl bg-chile-soft px-4 py-3 text-sm text-chile">
+            <x-icon name="alert" class="mt-0.5 size-4 shrink-0" />
+            <span>En la caja no puede haber menos de $0. Revisa el fondo inicial y que los gastos marcados como pagados con dinero de la caja <a href="{{ route('gastos') }}" wire:navigate class="font-semibold underline">en Gastos</a> sí hayan salido de ahí.</span>
+        </p>
+
+        {{-- Lo pendiente es de ahora: no tiene caso avisarlo al revisar el corte de otro día. --}}
+        @php $unpaid = $this->dayLabel === 'Hoy' ? \App\Models\Order::where('status', \App\Enums\OrderStatus::Open)->get(['total']) : collect(); @endphp
         @if ($unpaid->isNotEmpty())
             <a href="{{ route('pedidos') }}" wire:navigate class="flex items-center gap-3 rounded-2xl bg-limon-soft px-4 py-3 text-sm">
                 <x-icon name="alert" class="size-5 shrink-0" />
@@ -282,6 +325,13 @@ new #[Title('Corte de caja')] class extends Component
             <p class="flex gap-2 px-1 text-sm text-muted">
                 <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
                 <span>Además se cobraron {{ money($otherSales) }} por transferencia o tarjeta. Ese dinero no entra a la caja.</span>
+            </p>
+        @endif
+
+        @if ($this->cancelled->isNotEmpty())
+            <p class="flex gap-2 px-1 text-sm text-muted">
+                <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
+                <span>Se {{ $this->cancelled->count() === 1 ? 'canceló 1 venta' : 'cancelaron '.$this->cancelled->count().' ventas' }} por <span class="font-semibold text-ink">{{ money($this->cancelled->sum('total')) }}</span>. Ya no cuentan en el efectivo. <a href="{{ route('ventas') }}" wire:navigate class="font-semibold underline">Ver en Ventas</a></span>
             </p>
         @endif
 
@@ -355,6 +405,33 @@ new #[Title('Corte de caja')] class extends Component
                 <x-money-input id="counted" wire:model="counted" placeholder="0" class="!min-h-14 !text-2xl" />
                 <p class="hint">Cuenta billetes y monedas al cerrar.</p>
                 @error('counted') <p class="error">{{ $message }}</p> @enderror
+
+                {{-- Arqueo por billetes: se cuenta cada uno y el total pasa solo a Efectivo contado. --}}
+                <div class="mt-2" x-data="{
+                        open: false,
+                        bills: { 500: '', 200: '', 100: '', 50: '', 20: '' },
+                        coins: '',
+                        get sum() { return Object.entries(this.bills).reduce((t, [value, n]) => t + Number(value) * (Number(n) || 0), 0) + (Number(this.coins) || 0) },
+                     }"
+                     x-effect="if (open && sum > 0) $wire.counted = String(Math.round(sum * 100) / 100)">
+                    <button type="button" class="btn-quiet -ml-2.5" @click="open = ! open" :aria-expanded="open">
+                        <x-icon name="banknote" class="size-4" /> Contar por billetes
+                    </button>
+                    <div x-show="open" x-collapse x-cloak class="mt-2 space-y-2 rounded-xl bg-sunken/60 p-3">
+                        <template x-for="value in [500, 200, 100, 50, 20]" :key="value">
+                            <label class="flex items-center gap-3">
+                                <span class="w-28 text-sm" x-text="'Billetes de $' + value"></span>
+                                <input type="number" inputmode="numeric" min="0" x-model="bills[value]" class="input !min-h-10 w-20 text-center" placeholder="0" :aria-label="'Billetes de ' + value">
+                                <span class="num ml-auto text-base" x-text="fmt(value * (Number(bills[value]) || 0))"></span>
+                            </label>
+                        </template>
+                        <label class="flex items-center gap-3">
+                            <span class="w-28 text-sm">Monedas</span>
+                            <span class="w-32"><x-money-input x-model="coins" placeholder="0" class="!min-h-10 !text-base" aria-label="Total en monedas" /></span>
+                        </label>
+                        <p class="flex items-center justify-between border-t border-line pt-2 text-sm font-semibold">Total contado <span class="num text-xl" x-text="fmt(sum)"></span></p>
+                    </div>
+                </div>
             </div>
 
             <div x-show="diff !== null" x-cloak class="flex items-center justify-between gap-3 rounded-xl px-4 py-3.5"
@@ -368,6 +445,13 @@ new #[Title('Corte de caja')] class extends Component
             </div>
 
             <div>
+                <label class="label" for="kept">Se queda de fondo para mañana</label>
+                <x-money-input id="kept" wire:model="kept" x-bind:placeholder="$wire.opening || '0'" />
+                <p class="hint" x-show="takeHome !== null" x-cloak>Te llevas <span class="font-semibold text-ink" x-text="fmt(takeHome)"></span>. Mañana la caja empieza con el fondo.</p>
+                @error('kept') <p class="error">{{ $message }}</p> @enderror
+            </div>
+
+            <div>
                 <label class="label" for="notes">Nota <span class="font-normal text-muted">(opcional)</span></label>
                 <input id="notes" type="text" wire:model="notes" class="input" maxlength="255" placeholder="Ej. se pagó el gas con efectivo de la caja">
                 @error('notes') <p class="error">{{ $message }}</p> @enderror
@@ -377,7 +461,12 @@ new #[Title('Corte de caja')] class extends Component
                 <span wire:loading.remove wire:target="save">{{ $this->saved ? 'Actualizar corte' : 'Guardar corte' }}</span>
                 <span wire:loading wire:target="save">Guardando...</span>
             </button>
-            @if ($this->saved)
+            @if ($this->savedIsStale)
+                <p class="-mt-2 flex gap-2 rounded-xl bg-limon-soft px-3 py-2.5 text-sm">
+                    <x-icon name="alert" class="mt-0.5 size-4 shrink-0" />
+                    <span>Después de guardar hubo cambios: el corte guardado decía {{ money($this->saved->expected) }} y ahora debe haber {{ money($this->expected) }}. Vuelve a contar y actualízalo.</span>
+                </p>
+            @elseif ($this->saved)
                 <p class="-mt-2 text-center text-sm text-muted">Guardado a las {{ $this->saved->updated_at->format('g:i a') }}</p>
             @endif
         </section>

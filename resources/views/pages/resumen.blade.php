@@ -5,6 +5,7 @@ use App\Models\Expense;
 use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\Product;
+use App\Support\BusinessDay;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,10 +24,11 @@ new #[Title('Resumen')] class extends Component
 
     public string $range = 'week';
 
+    /** Fechas de días de trabajo: lo vendido de madrugada cuenta en el día anterior si así se configuró (BusinessDay). */
     #[Computed]
     public function from(): CarbonImmutable
     {
-        $today = CarbonImmutable::today();
+        $today = BusinessDay::today();
 
         return match ($this->range) {
             'today' => $today,
@@ -39,7 +41,7 @@ new #[Title('Resumen')] class extends Component
     #[Computed]
     public function to(): CarbonImmutable
     {
-        return CarbonImmutable::today()->endOfDay();
+        return BusinessDay::today()->endOfDay();
     }
 
     /** Periodo anterior de la misma duración, para comparar. */
@@ -56,12 +58,12 @@ new #[Title('Resumen')] class extends Component
         return DB::table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->where('orders.status', OrderStatus::Paid->value)
-            ->whereRaw('COALESCE(orders.paid_at, orders.sold_at) BETWEEN ? AND ?', [$from, $to]);
+            ->whereRaw('COALESCE(orders.paid_at, orders.sold_at) BETWEEN ? AND ?', [BusinessDay::start($from), BusinessDay::end($to)]);
     }
 
     protected function paidOrders(CarbonImmutable $from, CarbonImmutable $to)
     {
-        return Order::paidBetween($from, $to);
+        return Order::paidBetween(BusinessDay::start($from), BusinessDay::end($to));
     }
 
     #[Computed]
@@ -116,7 +118,7 @@ new #[Title('Resumen')] class extends Component
     {
         $sales = $this->paidOrders($this->from, $this->to)
             ->get(['sold_at', 'paid_at', 'total'])
-            ->groupBy(fn ($o) => $o->countedAt()->toDateString())
+            ->groupBy(fn ($o) => BusinessDay::of($o->countedAt())->toDateString())
             ->map->sum('total');
 
         $expenses = Expense::whereDate('spent_on', '>=', $this->from)->whereDate('spent_on', '<=', $this->to)
@@ -141,9 +143,11 @@ new #[Title('Resumen')] class extends Component
     #[Computed]
     public function hours(): Collection
     {
+        // Las horas se acomodan desde que empieza el día de trabajo: de 6 pm a 2 am quedan seguidas.
+        $endHour = BusinessDay::endHour();
         $byHour = $this->paidOrders($this->from, $this->to)
             ->get(['sold_at', 'total'])
-            ->groupBy(fn ($o) => $o->sold_at->hour)
+            ->groupBy(fn ($o) => ($o->sold_at->hour - $endHour + 24) % 24)
             ->map->sum('total');
 
         if ($byHour->isEmpty()) {
@@ -151,22 +155,22 @@ new #[Title('Resumen')] class extends Component
         }
 
         return collect(range($byHour->keys()->min(), $byHour->keys()->max()))
-            ->map(fn ($h) => ['hour' => $h, 'sales' => (float) ($byHour[$h] ?? 0)]);
+            ->map(fn ($h) => ['hour' => ($h + $endHour) % 24, 'sales' => (float) ($byHour[$h] ?? 0)]);
     }
 
     /** Promedio de venta por día de la semana en las últimas 8 semanas (sin contar hoy). */
     #[Computed]
     public function weekdays(): array
     {
-        $from = CarbonImmutable::today()->subWeeks(8);
-        $to = CarbonImmutable::today()->subSecond();
-        $day = 'DATE(COALESCE(orders.paid_at, orders.sold_at))';
+        $from = BusinessDay::today()->subWeeks(8);
+        $to = BusinessDay::today()->subSecond();
+        $day = 'DATE(COALESCE(orders.paid_at, orders.sold_at) - INTERVAL \''.BusinessDay::endHour().' hours\')';
         $weekday = fn ($row) => CarbonImmutable::parse($row->day)->dayOfWeekIso;
 
         // Se suma en la base: un renglón por día y uno por producto y día, no todas las órdenes.
         $sales = DB::table('orders')
             ->where('status', OrderStatus::Paid->value)
-            ->whereRaw('COALESCE(orders.paid_at, orders.sold_at) BETWEEN ? AND ?', [$from, $to])
+            ->whereRaw('COALESCE(orders.paid_at, orders.sold_at) BETWEEN ? AND ?', [BusinessDay::start($from), BusinessDay::end($to)])
             ->selectRaw("{$day} as day, SUM(total) as total")
             ->groupByRaw($day)
             ->get()
@@ -205,6 +209,20 @@ new #[Title('Resumen')] class extends Component
             ['Arma la receta de tus productos', 'Para saber cuánto ganas por cada uno.', $withRecipe > 0, 'productos'],
             ['Registra tu primera venta', 'Toca los productos y cobra.', Order::exists(), 'vender'],
         ];
+    }
+
+    /**
+     * Las etiquetas de las barras de las orillas se alinean hacia adentro para no salirse de la tarjeta.
+     *
+     * @return array<int, string>
+     */
+    public function tipAlign(object $loop): array
+    {
+        return match (true) {
+            $loop->index < 2 => ['left-0'],
+            $loop->remaining < 2 => ['right-0'],
+            default => ['left-1/2', '-translate-x-1/2'],
+        };
     }
 
     public function hourLabel(int $h): string
@@ -317,7 +335,7 @@ new #[Title('Resumen')] class extends Component
                     <dt class="font-semibold">Ganancia por receta</dt>
                     <dd @class(['num text-[1.75rem] leading-none font-bold', 'text-salsa' => $t['recipeProfit'] > 0])>{{ money(round($t['recipeProfit'])) }}</dd>
                 </div>
-                <div class="mt-1 flex items-center justify-between bg-sunken/60 px-5 py-3">
+                <div class="mt-1 flex items-center justify-between gap-4 bg-sunken/60 px-5 py-3">
                     <dt>
                         <span class="block font-semibold">Ventas menos gastos</span>
                         <span class="block text-sm text-muted">Lo que entró menos lo que pagaste ({{ money(round($t['expenses'])) }})</span>
@@ -328,7 +346,7 @@ new #[Title('Resumen')] class extends Component
             @if ($t['tips'] > 0 || $t['discounts'] > 0)
                 <div class="flex flex-wrap gap-x-6 gap-y-1 border-t border-line px-5 py-3 text-sm text-muted">
                     @if ($t['discounts'] > 0) <span>Descuentos y cortesías <span class="num text-base font-bold text-ink">{{ money(round($t['discounts'])) }}</span></span> @endif
-                    @if ($t['tips'] > 0) <span>Propinas, aparte de las ventas <span class="num text-base font-bold text-ink">{{ money(round($t['tips'])) }}</span></span> @endif
+                    @if ($t['tips'] > 0) <span>Propinas, aparte de las ventas <span class="num text-base font-bold text-ink">{{ money($t['tips']) }}</span></span> @endif
                 </div>
             @endif
             <details class="group border-t border-line px-5 py-3 text-sm">
@@ -359,7 +377,7 @@ new #[Title('Resumen')] class extends Component
                                     </div>
                                     <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sunken"><div class="h-full rounded-full bg-sales" style="width: {{ (int) $row->qty / $maxQty * 100 }}%"></div></div>
                                     <div class="mt-1 flex justify-between text-sm text-muted">
-                                        <span>{{ (int) $row->qty }} vendidos</span>
+                                        <span>{{ (int) $row->qty }} {{ (int) $row->qty === 1 ? 'vendido' : 'vendidos' }}</span>
                                         @if ((float) $row->cost > 0)
                                             <span>ganancia <span class="font-semibold text-salsa">{{ money(round($profit)) }}</span></span>
                                         @else
@@ -393,14 +411,15 @@ new #[Title('Resumen')] class extends Component
                             </div>
                             <div class="mt-6 flex h-40 items-end gap-1 border-b border-line">
                                 @foreach ($days as $row)
-                                    <div class="group relative flex h-full min-w-0 flex-1 items-end justify-center gap-[2px]" tabindex="0">
+                                    <div class="group relative flex h-full min-w-0 flex-1 items-end justify-center gap-[2px]" tabindex="0"
+                                         @pointerdown="if (document.activeElement === $el) { $event.preventDefault(); $el.blur() }">
                                         <div class="relative w-full max-w-5 rounded-t-[4px] bg-sales" style="height: {{ $row['sales'] / $maxDay * 100 }}%">
                                             @if ($row === $peakDay && $row['sales'] > 0)
                                                 <span class="num absolute bottom-full left-1/2 mb-1 -translate-x-1/2 text-xs font-bold whitespace-nowrap">{{ money(round($row['sales'])) }}</span>
                                             @endif
                                         </div>
                                         <div class="w-full max-w-5 rounded-t-[4px] bg-spend" style="height: {{ $row['expenses'] / $maxDay * 100 }}%"></div>
-                                        <div class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-lg bg-ink px-2.5 py-1.5 text-xs whitespace-nowrap text-bg shadow-lg group-hover:block group-focus:block">
+                                        <div @class(['pointer-events-none absolute bottom-full z-10 mb-1 hidden rounded-lg bg-ink px-2.5 py-1.5 text-xs whitespace-nowrap text-bg shadow-lg group-hover:block group-focus:block', ...$this->tipAlign($loop)])>
                                             <span class="font-semibold">{{ ucfirst($row['date']->translatedFormat('D j M')) }}</span><br>
                                             Ventas {{ money($row['sales']) }}<br>Gastos {{ money($row['expenses']) }}
                                         </div>
@@ -435,7 +454,7 @@ new #[Title('Resumen')] class extends Component
                                                 <span @class(['block h-full rounded-full', 'bg-sales' => $iso === $bestDay, 'bg-sales/45' => $iso !== $bestDay]) style="width: {{ $d['avg'] / $maxAvg * 100 }}%"></span>
                                             </span>
                                             @if ($d['top'])
-                                                <span class="mt-0.5 block truncate text-xs text-muted">Lo que más sale: {{ $d['top'] }} ({{ $d['topQty'] }} al día)</span>
+                                                <span class="mt-0.5 block text-xs leading-snug text-muted">Lo que más sale: {{ $d['top'] }} ({{ $d['topQty'] }} al día)</span>
                                             @endif
                                         </span>
                                         <span class="num text-right text-base font-bold">{{ $d['days'] ? money(round($d['avg'])) : '-' }}</span>
@@ -459,13 +478,14 @@ new #[Title('Resumen')] class extends Component
                             <div class="mt-6 flex h-28 items-end gap-1.5 border-b border-line">
                                 @foreach ($hours as $h)
                                     @php $isPeak = $h['hour'] === $peak['hour']; @endphp
-                                    <div class="group relative flex h-full min-w-0 flex-1 items-end justify-center" tabindex="0">
+                                    <div class="group relative flex h-full min-w-0 flex-1 items-end justify-center" tabindex="0"
+                                         @pointerdown="if (document.activeElement === $el) { $event.preventDefault(); $el.blur() }">
                                         <div @class(['relative w-full max-w-7 rounded-t-[4px]', 'bg-sales' => $isPeak, 'bg-sales/35' => ! $isPeak]) style="height: {{ max(2, $h['sales'] / $maxHour * 100) }}%">
                                             @if ($isPeak)
                                                 <span class="num absolute bottom-full left-1/2 mb-1 -translate-x-1/2 text-xs font-bold whitespace-nowrap">{{ money(round($h['sales'])) }}</span>
                                             @endif
                                         </div>
-                                        <div class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-lg bg-ink px-2.5 py-1.5 text-xs whitespace-nowrap text-bg shadow-lg group-hover:block group-focus:block">
+                                        <div @class(['pointer-events-none absolute bottom-full z-10 mb-1 hidden rounded-lg bg-ink px-2.5 py-1.5 text-xs whitespace-nowrap text-bg shadow-lg group-hover:block group-focus:block', ...$this->tipAlign($loop)])>
                                             {{ $this->hourLabel($h['hour']) }}: {{ money($h['sales']) }}
                                         </div>
                                     </div>

@@ -46,6 +46,14 @@ class MoneyTest extends TestCase
         Livewire::test('pages::corte')->assertSet('cashSales', 110.0)->assertSet('tips', 10.0);
     }
 
+    public function test_sales_by_payment_method_leave_tips_out(): void
+    {
+        $this->sell(['method' => 'transfer', 'tip' => '10']);
+        $this->sell([], [['product_id' => $this->taco->id, 'qty' => 3]]);
+
+        Livewire::test('pages::ventas')->assertSeeInOrder(['Efectivo</dt>', '$60</dd>', 'Transferencia</dt>', '$100</dd>'], false);
+    }
+
     public function test_discount_by_amount_and_by_percent(): void
     {
         $this->sell(['discount' => '15']);
@@ -108,6 +116,26 @@ class MoneyTest extends TestCase
             ->set('lines', [['product_id' => $this->taco->id, 'qty' => 5]])
             ->set('tip', '10')->set('received', '105')
             ->call('charge')
-            ->assertReturned(['ok' => false, 'error' => 'El monto recibido no alcanza para el total.']);
+            ->assertReturned(['ok' => false, 'error' => 'El monto recibido no alcanza para el total.', 'field' => 'received']);
+    }
+
+    public function test_mixed_payment_cash_received_must_cover_the_cash_part(): void
+    {
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->taco->id, 'qty' => 5]])
+            ->set('method', 'mixed')->set('cashPart', '60')->set('received', '50')
+            ->call('charge')
+            ->assertReturned(['ok' => false, 'error' => 'El efectivo recibido no alcanza para la parte en efectivo.', 'field' => 'received']);
+
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_mixed_payment_keeps_the_change_of_the_cash_part(): void
+    {
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->taco->id, 'qty' => 5]])
+            ->set('method', 'mixed')->set('cashPart', '60')->set('received', '100')
+            ->call('charge')
+            ->assertSet('lastChange', 40.0);
     }
 }

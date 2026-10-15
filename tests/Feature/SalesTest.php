@@ -88,7 +88,7 @@ class SalesTest extends TestCase
             ->set('lines', [$this->line($taco, 1)])
             ->set('received', '10')
             ->call('charge')
-            ->assertReturned(['ok' => false, 'error' => 'El monto recibido no alcanza para el total.']);
+            ->assertReturned(['ok' => false, 'error' => 'El monto recibido no alcanza para el total.', 'field' => 'received']);
 
         $this->assertSame(0, Order::count());
     }
@@ -120,6 +120,143 @@ class SalesTest extends TestCase
         $component->call('undo');
 
         $this->assertSame(OrderStatus::Paid, Order::sole()->status);
+    }
+
+    public function test_undo_after_two_minutes_points_to_correcting_from_pedidos(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $component = Livewire::test('pages::vender')->set('lines', [$this->line($taco, 1)])->call('charge');
+        $this->travel(3)->minutes();
+
+        $component->call('undo')->assertDispatched('toast', message: 'Ya pasaron más de 2 minutos. Corrígela desde Pedidos.', type: 'error');
+
+        $this->assertSame(OrderStatus::Paid, Order::sole()->status);
+    }
+
+    public function test_sale_charged_again_unchanged_after_undo_keeps_its_place_in_the_kitchen(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $component = Livewire::test('pages::vender')->set('lines', [$this->line($taco, 2)])->call('charge');
+        $first = Order::sole();
+        Livewire::test('pages::cocina')->call('markReady', $first->id);
+        $this->travel(1)->minutes();
+
+        $component->call('undo')->set('method', 'transfer')->call('charge');
+
+        $again = Order::where('status', OrderStatus::Paid)->sole();
+        $this->assertSame($first->sold_at->toDateTimeString(), $again->sold_at->toDateTimeString());
+        $this->assertNotNull($again->ready_at);
+        Livewire::test('pages::cocina')->assertSet('queue', fn ($queue) => $queue->isEmpty());
+    }
+
+    public function test_charged_order_is_corrected_from_ventas_and_charged_again(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        Livewire::test('pages::vender')->set('lines', [$this->line($taco, 2)])->set('label', 'Juan')->call('charge');
+        $first = Order::sole();
+        $first->update(['delivered_at' => now()]);
+
+        Livewire::test('pages::ventas')->call('correct', $first->id)->assertRedirect(route('vender'));
+        Livewire::test('pages::vender')
+            ->assertSet('label', 'Juan')
+            ->assertSet('correcting', true)
+            ->assertSet('openPay', true)
+            ->set('lines.0.qty', 3)
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        $this->assertSame(OrderStatus::Cancelled, $first->fresh()->status);
+        $this->assertSame(Order::CORRECTION, $first->fresh()->cancel_reason);
+        $again = Order::where('status', OrderStatus::Paid)->sole();
+        $this->assertSame(1, $again->daily_number);
+        $this->assertSame('60.00', $again->total);
+    }
+
+    public function test_payment_method_is_changed_without_cancelling_the_sale(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        Livewire::test('pages::vender')->set('lines', [$this->line($taco, 5)])->call('charge');
+        $order = Order::sole();
+
+        Livewire::test('pages::ventas')
+            ->call('editPayment', $order->id)
+            ->assertSet('payMethod', 'cash')
+            ->set('payMethod', 'transfer')
+            ->set('payReference', 'F-9')
+            ->call('savePayment')
+            ->assertHasNoErrors();
+
+        $order->refresh();
+        $this->assertSame(OrderStatus::Paid, $order->status);
+        $this->assertSame('transfer', $order->payment_method->value);
+        $this->assertSame(['transfer' => '100.00'], $order->payments->pluck('amount', 'method.value')->all());
+        Livewire::test('pages::corte')->assertSet('cashSales', 0.0)->assertSet('otherSales', 100.0);
+    }
+
+    public function test_mixed_payment_change_needs_a_cash_part_below_the_total(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        Livewire::test('pages::vender')->set('lines', [$this->line($taco, 5)])->call('charge');
+        $order = Order::sole();
+
+        Livewire::test('pages::ventas')
+            ->call('editPayment', $order->id)
+            ->set('payMethod', 'mixed')
+            ->set('payCashPart', '100')
+            ->call('savePayment')
+            ->assertHasErrors(['payCashPart' => 'En pago mixto el efectivo tiene que ser menos que el total.']);
+
+        $this->assertSame('cash', $order->fresh()->payment_method->value);
+    }
+
+    public function test_sale_from_another_day_cannot_be_changed(): void
+    {
+        $this->travelTo(today()->setTime(12, 0));
+        $order = Order::create(['daily_number' => 1, 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 50, 'sold_at' => now()->subDay(), 'paid_at' => now()->subDay()]);
+
+        Livewire::test('pages::ventas')
+            ->set('date', today()->subDay()->toDateString())
+            ->assertSee('Es de otro día')
+            ->assertDontSee('Cancelar venta')
+            ->call('cancel', $order->id)
+            ->call('correct', $order->id)
+            ->assertNoRedirect();
+
+        $this->assertSame(OrderStatus::Paid, $order->fresh()->status);
+    }
+
+    public function test_cancelled_sale_records_when_it_was_cancelled(): void
+    {
+        $this->freezeTime();
+        $order = Order::create(['daily_number' => 1, 'status' => OrderStatus::Paid, 'payment_method' => 'cash', 'total' => 50, 'sold_at' => now(), 'paid_at' => now()]);
+
+        Livewire::test('pages::ventas')->call('cancel', $order->id);
+
+        $this->assertSame(now()->toDateTimeString(), $order->fresh()->cancelled_at->toDateTimeString());
+        $this->assertNull($order->fresh()->cancel_reason);
+    }
+
+    public function test_sale_changed_after_undo_goes_back_to_the_kitchen(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $component = Livewire::test('pages::vender')->set('lines', [$this->line($taco, 2)])->call('charge');
+        Livewire::test('pages::cocina')->call('markReady', Order::sole()->id);
+
+        $component->call('undo')->set('lines.0.qty', 3)->call('charge');
+
+        $this->assertNull(Order::where('status', OrderStatus::Paid)->sole()->ready_at);
+    }
+
+    public function test_cash_sale_keeps_the_change_to_give(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+
+        Livewire::test('pages::vender')
+            ->set('lines', [$this->line($taco, 3)])
+            ->set('received', '100')
+            ->call('charge')
+            ->assertSet('lastChange', 40.0)
+            ->assertSee('Cambio');
     }
 
     public function test_daily_number_restarts_each_day(): void
@@ -178,6 +315,33 @@ class SalesTest extends TestCase
         $this->assertSame([OrderStatus::Cancelled, OrderStatus::Paid], Order::orderBy('id')->pluck('status')->all());
     }
 
+    public function test_sale_corrected_with_undo_cannot_be_restored(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        Livewire::test('pages::vender')->set('lines', [$this->line($taco, 2)])->call('charge')->call('undo')->call('charge');
+        $undone = Order::where('status', OrderStatus::Cancelled)->sole();
+
+        Livewire::test('pages::ventas')
+            ->assertSee('Corregida')
+            ->assertDontSee('Restaurar venta')
+            ->call('restore', $undone->id)
+            ->assertDispatched('toast', type: 'error');
+
+        $this->assertSame(OrderStatus::Cancelled, $undone->fresh()->status);
+        $this->assertSame(1, Order::where('status', OrderStatus::Paid)->count());
+    }
+
+    public function test_sale_undone_and_not_charged_again_can_be_restored(): void
+    {
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        Livewire::test('pages::vender')->set('lines', [$this->line($taco, 2)])->call('charge')->call('undo');
+        $undone = Order::sole();
+
+        Livewire::test('pages::ventas')->assertSee('Restaurar venta')->call('restore', $undone->id);
+
+        $this->assertSame(OrderStatus::Paid, $undone->fresh()->status);
+    }
+
     public function test_product_hidden_while_in_the_cart_blocks_the_charge(): void
     {
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
@@ -197,7 +361,7 @@ class SalesTest extends TestCase
             ->set('lines', [$this->line($taco, 1)])
             ->set('tip', '500000')
             ->call('charge')
-            ->assertReturned(['ok' => false, 'error' => 'Revisa la propina: el monto es demasiado alto.']);
+            ->assertReturned(['ok' => false, 'error' => 'Revisa la propina: el monto es demasiado alto.', 'field' => 'tip']);
 
         $this->assertSame(0, Order::count());
     }

@@ -2,6 +2,7 @@
 
 use App\Enums\OrderStatus;
 use App\Models\Order;
+use App\Support\BusinessDay;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -12,14 +13,14 @@ new #[Title('Pedidos')] class extends Component
     #[Computed]
     public function pending()
     {
-        return Order::with('items')->pending()->dueBetween(today())->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
+        return Order::with('items')->pending()->dueBetween(BusinessDay::startOfToday())->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
     }
 
     /** Guardados sin cobrar de días anteriores: ya no se preparan, falta cobrarlos o cancelarlos. */
     #[Computed]
     public function stale()
     {
-        return Order::with('items')->where('status', OrderStatus::Open)->dueBetween(null, today())->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
+        return Order::with('items')->where('status', OrderStatus::Open)->dueBetween(null, BusinessDay::startOfToday())->orderByRaw('COALESCE(pickup_at, sold_at)')->get();
     }
 
     #[Computed]
@@ -27,7 +28,7 @@ new #[Title('Pedidos')] class extends Component
     {
         return Order::with('items')
             ->where('status', OrderStatus::Paid)
-            ->where('delivered_at', '>=', today())
+            ->where('delivered_at', '>=', BusinessDay::startOfToday())
             ->orderByDesc('delivered_at')
             ->limit(15)
             ->get();
@@ -38,15 +39,16 @@ new #[Title('Pedidos')] class extends Component
         $order = Order::findOrFail($id);
         $order->update(['delivered_at' => now()]);
         unset($this->pending, $this->delivered);
+        $this->dispatch('pending-count', count: Order::pendingCount());
 
         $this->dispatch('toast', message: 'Entregado #'.$order->daily_number.($order->label ? ' '.$order->label : ''));
     }
 
-    /** A domicilio: sale con el repartidor. */
+    /** A domicilio: sale con el repartidor. Si ya salió, ya está preparado: deja la cocina. */
     public function dispatchOrder(int $id): void
     {
         $order = Order::findOrFail($id);
-        $order->update(['dispatched_at' => now()]);
+        $order->update(['dispatched_at' => now(), 'ready_at' => $order->ready_at ?? now()]);
         unset($this->pending);
         $this->dispatch('toast', message: '#'.$order->daily_number.' en camino');
     }
@@ -55,13 +57,15 @@ new #[Title('Pedidos')] class extends Component
     {
         Order::whereKey($id)->update(['delivered_at' => null]);
         unset($this->pending, $this->delivered);
+        $this->dispatch('pending-count', count: Order::pendingCount());
     }
 
     public function cancel(int $id): void
     {
-        Order::whereKey($id)->where('status', OrderStatus::Open)->update(['status' => OrderStatus::Cancelled]);
+        Order::where('status', OrderStatus::Open)->find($id)?->cancel();
         unset($this->pending, $this->stale);
         $this->dispatch('toast', message: 'Pedido cancelado');
+        $this->dispatch('pending-count', count: Order::pendingCount());
     }
 };
 ?>
@@ -69,7 +73,8 @@ new #[Title('Pedidos')] class extends Component
 <div wire:poll.15s.visible x-data="{ now: Date.now() }" x-init="setInterval(() => now = Date.now(), 30000)">
     <x-page-header title="Pedidos" tour="pedidos">
         <x-slot:actions>
-            <a href="{{ route('cocina') }}" class="btn" data-tour="cocina"><x-icon name="flame" class="size-4" /> Cocina</a>
+            {{-- En el celular solo el ícono: con el texto, el título se cortaba a "P...". --}}
+            <a href="{{ route('cocina') }}" class="btn max-sm:!px-3" data-tour="cocina" aria-label="Pantalla de cocina"><x-icon name="flame" class="size-4" /> <span class="max-sm:hidden">Cocina</span></a>
             <a href="{{ route('vender') }}" wire:navigate class="btn-primary" data-tour="nuevo-pedido"><x-icon name="plus" class="size-4" /> Pedido</a>
         </x-slot:actions>
     </x-page-header>
@@ -106,7 +111,7 @@ new #[Title('Pedidos')] class extends Component
                                     @if ($order->dispatched_at && ! $delivered)
                                         <span class="badge bg-naranja text-on-limon">En camino</span>
                                     @endif
-                                    @if ($order->ready_at && ! $delivered)
+                                    @if ($order->ready_at && ! $delivered && ! $order->dispatched_at)
                                         <span class="badge bg-salsa text-on-salsa">Listo</span>
                                     @endif
                                     @if ($delivered)
@@ -191,6 +196,12 @@ new #[Title('Pedidos')] class extends Component
                                 <button type="button" wire:click="dispatchOrder({{ $order->id }})" class="btn-primary flex-1 !border-naranja !bg-naranja !text-on-limon hover:!opacity-90">
                                     <x-icon name="right" class="size-4" /> Enviar
                                 </button>
+                            @elseif (! $delivered && $open)
+                                {{-- Entregar algo sin cobrar casi siempre es un olvido: se pregunta antes. --}}
+                                <button type="button" class="btn-primary flex-1 !bg-salsa !border-salsa !text-on-salsa hover:!opacity-90"
+                                        @click="if (await $store.confirm.ask({ title: '¿Entregar sin cobrar?', message: 'Este pedido sigue por cobrar. Se queda en la lista hasta que lo cobres.', action: 'Entregar sin cobrar', cancel: 'No', danger: false })) $wire.deliver({{ $order->id }})">
+                                    <x-icon name="check" class="size-4" /> Entregado
+                                </button>
                             @elseif (! $delivered)
                                 <button type="button" wire:click="deliver({{ $order->id }})" class="btn-primary flex-1 !bg-salsa !border-salsa !text-on-salsa hover:!opacity-90">
                                     <x-icon name="check" class="size-4" /> Entregado
@@ -204,7 +215,7 @@ new #[Title('Pedidos')] class extends Component
 
         @if ($this->stale->isNotEmpty())
             <section class="space-y-2" x-data="{ open: false }" data-tour="pedidos-anteriores">
-                <button type="button" @click="open = !open" class="flex w-full items-center justify-between px-1" :aria-expanded="open">
+                <button type="button" @click="open = !open" class="flex min-h-11 w-full items-center justify-between px-1" :aria-expanded="open">
                     <h2 class="section-title">Sin cobrar de días anteriores</h2>
                     <span class="flex items-center gap-1.5 text-sm text-muted">{{ $this->stale->count() }} <x-icon name="down" class="size-4 transition-transform" ::class="open && 'rotate-180'" /></span>
                 </button>
@@ -213,7 +224,7 @@ new #[Title('Pedidos')] class extends Component
                         <li wire:key="ps-{{ $order->id }}" class="flex items-center gap-3 py-3 pr-2 pl-4">
                             <span class="num w-8 text-center text-lg font-bold text-muted">{{ $order->daily_number }}</span>
                             <span class="min-w-0 flex-1">
-                                <span class="block truncate font-semibold">{{ $order->label ?: $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ') }}</span>
+                                <span class="block truncate font-semibold">{{ $order->label ?: $order->itemsSummary() }}</span>
                                 <span class="block text-sm text-muted">{{ ucfirst($order->dueAt()->translatedFormat('l j M, g:i a')) }}, {{ money($order->total) }}</span>
                             </span>
                             <a href="{{ route('vender', ['orden' => $order->id, 'cobrar' => 1]) }}" wire:navigate class="btn !min-h-9 !px-3">Cobrar</a>
@@ -229,7 +240,7 @@ new #[Title('Pedidos')] class extends Component
 
         @if ($this->delivered->isNotEmpty())
             <section class="space-y-2" x-data="{ open: false }" data-tour="entregados">
-                <button type="button" @click="open = !open" class="flex w-full items-center justify-between px-1" :aria-expanded="open">
+                <button type="button" @click="open = !open" class="flex min-h-11 w-full items-center justify-between px-1" :aria-expanded="open">
                     <h2 class="section-title">Entregados hoy</h2>
                     <span class="flex items-center gap-1.5 text-sm text-muted">{{ $this->delivered->count() }} <x-icon name="down" class="size-4 transition-transform" ::class="open && 'rotate-180'" /></span>
                 </button>
@@ -238,7 +249,7 @@ new #[Title('Pedidos')] class extends Component
                         <li wire:key="pd-{{ $order->id }}" class="flex items-center gap-3 px-4 py-3">
                             <span class="num w-8 text-center text-lg font-bold text-muted">{{ $order->daily_number }}</span>
                             <span class="min-w-0 flex-1">
-                                <span class="block truncate font-semibold">{{ $order->label ?: $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ') }}</span>
+                                <span class="block truncate font-semibold">{{ $order->label ?: $order->itemsSummary() }}</span>
                                 <span class="block text-sm text-muted">Entregado {{ $order->delivered_at->format('g:i a') }}</span>
                             </span>
                             <button type="button" wire:click="undeliver({{ $order->id }})" class="btn-quiet"><x-icon name="undo" class="size-4" /> Regresar</button>

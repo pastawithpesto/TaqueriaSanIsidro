@@ -4,6 +4,7 @@ use App\Models\Expense;
 use App\Models\Ingredient;
 use App\Models\ProductExtra;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -30,13 +31,17 @@ new #[Title('Insumos')] class extends Component
     /** El insumo que se edita ya está en recetas, extras o compras. */
     public bool $inUse = false;
 
+    /** La búsqueda ignora mayúsculas y acentos: "limon" encuentra "Limón". Son pocos insumos, se filtra aquí. */
     #[Computed]
     public function ingredients()
     {
-        return Ingredient::withCount('products')
-            ->when($this->search !== '', fn ($q) => $q->whereRaw('lower(name) like ?', ['%'.mb_strtolower($this->search).'%']))
+        $plain = fn (string $text) => Str::lower(Str::ascii($text));
+        $search = $plain(trim($this->search));
+
+        return Ingredient::withCount(['products', 'extras'])
             ->orderByDesc('active')->orderBy('name')
-            ->get();
+            ->get()
+            ->when($search !== '', fn ($all) => $all->filter(fn ($i) => str_contains($plain($i->name), $search))->values());
     }
 
     #[Computed]
@@ -135,9 +140,10 @@ new #[Title('Insumos')] class extends Component
 
     public function delete(int $id): void
     {
-        $i = Ingredient::withCount('products')->findOrFail($id);
+        $i = Ingredient::withCount(['products', 'extras'])->findOrFail($id);
 
-        if ($i->products_count === 0) {
+        // En una receta o un extra no se borra: su costo dejaría de contar sin aviso.
+        if ($i->products_count === 0 && $i->extras_count === 0) {
             $i->delete();
             $this->dispatch('toast', message: 'Insumo borrado');
         }
@@ -176,7 +182,7 @@ new #[Title('Insumos')] class extends Component
                         <span @class(['block truncate font-semibold', 'text-muted' => ! $i->active])>{{ $i->name }}</span>
                         <span class="mt-0.5 flex items-center gap-2 text-sm text-muted">
                             @unless ($i->active) <span class="badge bg-sunken text-muted">Inactivo</span> @endunless
-                            {{ $i->products_count === 0 ? 'Sin usar en recetas' : 'En '.$i->products_count.' '.($i->products_count === 1 ? 'receta' : 'recetas') }}
+                            {{ $i->usageLabel() }}
                         </span>
                     </button>
                     <span class="text-right">
@@ -188,7 +194,7 @@ new #[Title('Insumos')] class extends Component
                         <div x-show="menu" x-cloak x-anchor.bottom-end.offset.6.fixed="$refs.trigger" x-transition.origin.top.right class="menu" @click="menu = false">
                             <button type="button" @click="sheet = true; $wire.edit({{ $i->id }})"><x-icon name="pencil" class="size-4 text-muted" /> Editar</button>
                             <button type="button" wire:click="toggle({{ $i->id }})"><x-icon :name="$i->active ? 'eye-off' : 'eye'" class="size-4 text-muted" /> {{ $i->active ? 'Desactivar' : 'Activar' }}</button>
-                            @if ($i->products_count === 0)
+                            @if ($i->products_count === 0 && $i->extras_count === 0)
                                 <button type="button" class="text-chile" @click="if (await $store.confirm.ask({ title: @js('¿Borrar '.$i->name.'?'), message: 'Las compras ya registradas se conservan.', action: 'Borrar' })) $wire.delete({{ $i->id }})"><x-icon name="trash" class="size-4" /> Borrar</button>
                             @endif
                         </div>
@@ -214,7 +220,14 @@ new #[Title('Insumos')] class extends Component
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="label" for="unit">Se compra por</label>
-                        <select id="unit" wire:model="unit" class="input">
+                        {{-- Al editar, pasar de kg a g (o de lt a ml) también convierte el costo a la vista: $35 por kg son $0.035 por g. --}}
+                        <select id="unit" wire:model="unit" class="input"
+                                x-data="{ from: '' }" @focus="from = $el.value"
+                                @change="
+                                    const factor = @js($this::CONVERSIONS)[from]?.[$el.value];
+                                    if ($wire.editingId && factor && Number($wire.cost_per_unit) > 0) $wire.cost_per_unit = String(Math.round(Number($wire.cost_per_unit) / factor * 10000) / 10000);
+                                    from = $el.value;
+                                ">
                             @foreach ($this::UNITS as $u)
                                 <option value="{{ $u }}">{{ $u }}</option>
                             @endforeach

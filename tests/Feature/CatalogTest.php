@@ -88,6 +88,28 @@ class CatalogTest extends TestCase
         $this->assertSame(1, Ingredient::count());
     }
 
+    public function test_ingredient_search_ignores_accents_and_case(): void
+    {
+        Ingredient::create(['name' => 'Limón', 'unit' => 'kg', 'cost_per_unit' => 40]);
+        Ingredient::create(['name' => 'Cebolla', 'unit' => 'kg', 'cost_per_unit' => 35]);
+
+        Livewire::test('pages::insumos')
+            ->set('search', 'LIMON')
+            ->assertSet('ingredients', fn ($found) => $found->pluck('name')->all() === ['Limón']);
+    }
+
+    public function test_ingredient_used_by_an_extra_is_not_deleted(): void
+    {
+        $bacon = Ingredient::create(['name' => 'Tocino', 'unit' => 'kg', 'cost_per_unit' => 200]);
+        Product::create(['name' => 'Hamburguesa', 'price' => 50])->extras()->create(['name' => 'Tocino', 'price' => 12, 'ingredient_id' => $bacon->id, 'quantity' => 0.02]);
+
+        Livewire::test('pages::insumos')
+            ->assertSee('En 1 extra')
+            ->call('delete', $bacon->id);
+
+        $this->assertModelExists($bacon);
+    }
+
     public function test_product_with_recipe_is_saved_and_costed(): void
     {
         $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
@@ -301,5 +323,42 @@ class CatalogTest extends TestCase
         Livewire::test('pages::productos')->call('move', $bistec->id, 1);
 
         $this->assertSame(['Pastor', 'Bistec'], Product::orderBy('sort_order')->pluck('name')->all());
+    }
+
+    public function test_sell_screen_keeps_each_category_together(): void
+    {
+        Product::create(['name' => 'Bistec', 'category' => 'Tacos', 'price' => 20, 'sort_order' => 0]);
+        Product::create(['name' => 'Torta', 'category' => 'Tortas', 'price' => 39, 'sort_order' => 1]);
+        Product::create(['name' => 'Pastor', 'category' => 'Tacos', 'price' => 20, 'sort_order' => 2]);
+
+        $names = Livewire::test('pages::vender')->get('products')->pluck('name')->all();
+
+        $this->assertSame(['Bistec', 'Pastor', 'Torta'], $names);
+    }
+
+    public function test_category_typed_in_other_case_reuses_the_existing_one(): void
+    {
+        Product::create(['name' => 'Bistec', 'category' => 'Tacos', 'price' => 20]);
+
+        Livewire::test('pages::productos')
+            ->call('create')
+            ->set('name', 'Pastor')
+            ->set('price', '22')
+            ->set('category', ' tacos ')
+            ->call('save');
+
+        $this->assertSame('Tacos', Product::firstWhere('name', 'Pastor')->category);
+    }
+
+    public function test_only_product_in_a_category_can_fix_its_capitalization(): void
+    {
+        $pastor = Product::create(['name' => 'Pastor', 'category' => 'tacos', 'price' => 22]);
+
+        Livewire::test('pages::productos')
+            ->call('edit', $pastor->id)
+            ->set('category', 'Tacos')
+            ->call('save');
+
+        $this->assertSame('Tacos', $pastor->fresh()->category);
     }
 }

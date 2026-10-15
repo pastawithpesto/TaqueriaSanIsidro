@@ -3,6 +3,7 @@
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Models\Order;
+use App\Support\BusinessDay;
 use Carbon\CarbonImmutable;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -12,9 +13,22 @@ new #[Title('Ventas')] class extends Component
 {
     public string $date = '';
 
+    /** Cambio de forma de pago de una venta ya cobrada. */
+    public bool $showPayment = false;
+
+    public ?int $payOrderId = null;
+
+    public string $payMethod = 'cash';
+
+    public ?string $payCashPart = null;
+
+    public string $payOtherMethod = 'transfer';
+
+    public ?string $payReference = null;
+
     public function mount(): void
     {
-        $this->date = today()->toDateString();
+        $this->date = BusinessDay::today()->toDateString();
     }
 
     protected function day(): CarbonImmutable
@@ -22,7 +36,7 @@ new #[Title('Ventas')] class extends Component
         try {
             return CarbonImmutable::parse($this->date)->startOfDay();
         } catch (Throwable) {
-            return CarbonImmutable::today();
+            return BusinessDay::today();
         }
     }
 
@@ -32,8 +46,8 @@ new #[Title('Ventas')] class extends Component
         $day = $this->day();
 
         return match (true) {
-            $day->isToday() => 'Hoy',
-            $day->isYesterday() => 'Ayer',
+            $day->equalTo(BusinessDay::today()) => 'Hoy',
+            $day->equalTo(BusinessDay::today()->subDay()) => 'Ayer',
             default => ucfirst($day->translatedFormat('l')),
         };
     }
@@ -44,7 +58,7 @@ new #[Title('Ventas')] class extends Component
         $day = $this->day();
 
         return Order::with(['items', 'payments'])
-            ->countedBetween($day, $day->endOfDay())
+            ->countedBetween(BusinessDay::start($day), BusinessDay::end($day))
             ->orderByRaw('COALESCE(paid_at, sold_at)')
             ->get()
             ->each(fn ($o, $i) => $o->number = $i + 1)
@@ -58,19 +72,123 @@ new #[Title('Ventas')] class extends Component
         return $this->orders->where('status', OrderStatus::Paid);
     }
 
+    /**
+     * Solo se corrige lo del día de trabajo en curso: lo de otros días ya está en su corte.
+     * Si se devolvió dinero de una venta vieja, va como retiro en el corte de hoy.
+     */
+    protected function editable(Order $order): bool
+    {
+        return BusinessDay::isCurrent($order->countedAt());
+    }
+
+    protected function refuse(): void
+    {
+        $this->dispatch('toast', message: 'Es de otro día. Si devolviste dinero, anótalo como retiro en el corte de hoy.', type: 'error');
+    }
+
+    protected function changed(string $message): void
+    {
+        unset($this->orders, $this->paid);
+        $this->dispatch('toast', message: $message);
+        $this->dispatch('pending-count', count: Order::pendingCount());
+    }
+
     public function cancel(int $id): void
     {
-        Order::whereKey($id)->update(['status' => OrderStatus::Cancelled]);
-        unset($this->orders, $this->paid);
-        $this->dispatch('toast', message: 'Venta cancelada');
+        $order = Order::where('status', OrderStatus::Paid)->findOrFail($id);
+
+        if (! $this->editable($order)) {
+            $this->refuse();
+
+            return;
+        }
+
+        $order->cancel();
+        $this->changed('Venta cancelada');
     }
 
     public function restore(int $id): void
     {
-        $order = Order::findOrFail($id);
-        $order->update(['status' => $order->payment_method ? OrderStatus::Paid : OrderStatus::Open]);
-        unset($this->orders, $this->paid);
-        $this->dispatch('toast', message: 'Venta restaurada');
+        $order = Order::where('status', OrderStatus::Cancelled)->findOrFail($id);
+
+        if (! $this->editable($order)) {
+            $this->refuse();
+
+            return;
+        }
+
+        if ($order->wasCorrected()) {
+            $this->dispatch('toast', message: 'Esta venta se corrigió y ya se volvió a cobrar.', type: 'error');
+
+            return;
+        }
+
+        $order->update(['status' => $order->payment_method ? OrderStatus::Paid : OrderStatus::Open, 'cancelled_at' => null, 'cancel_reason' => null]);
+        $this->changed('Venta restaurada');
+    }
+
+    /** Cobrada mal (faltó o sobró algo): Vender la cancela y la abre con todo para cobrarla de nuevo. */
+    public function correct(int $id): void
+    {
+        $order = Order::where('status', OrderStatus::Paid)->findOrFail($id);
+
+        if (! $this->editable($order)) {
+            $this->refuse();
+
+            return;
+        }
+
+        session()->flash('vender.corregir', $order->id);
+        $this->redirectRoute('vender', navigate: true);
+    }
+
+    #[Computed]
+    public function payOrder(): ?Order
+    {
+        return $this->payOrderId ? Order::find($this->payOrderId) : null;
+    }
+
+    public function editPayment(int $id): void
+    {
+        $order = Order::with('payments')->where('status', OrderStatus::Paid)->findOrFail($id);
+        $cash = $order->payments->firstWhere('method', PaymentMethod::Cash);
+        $other = $order->payments->first(fn ($p) => $p->method !== PaymentMethod::Cash);
+
+        $this->resetErrorBag();
+        $this->payOrderId = $order->id;
+        $this->payMethod = $order->payment_method?->value ?? 'cash';
+        $this->payCashPart = $order->payment_method === PaymentMethod::Mixed && $cash ? rtrim(rtrim((string) $cash->amount, '0'), '.') : null;
+        $this->payOtherMethod = $other && $other->method !== PaymentMethod::Mixed ? $other->method->value : 'transfer';
+        $this->payReference = $order->payment_reference;
+        $this->showPayment = true;
+    }
+
+    /** El error más común al cobrar: se cambia el pago sin cancelar la venta ni tocar la cocina. */
+    public function savePayment(): void
+    {
+        $order = Order::where('status', OrderStatus::Paid)->findOrFail($this->payOrderId);
+
+        if (! $this->editable($order)) {
+            $this->refuse();
+
+            return;
+        }
+
+        $due = round((float) $order->total + (float) $order->tip, 2);
+
+        $this->validate([
+            'payMethod' => ['required', 'in:cash,transfer,card,mixed'],
+            'payCashPart' => ['exclude_unless:payMethod,mixed', 'required', 'numeric', 'gt:0', 'lt:'.$due],
+            'payOtherMethod' => ['exclude_unless:payMethod,mixed', 'required', 'in:transfer,card'],
+            'payReference' => ['nullable', 'string', 'max:255'],
+        ], [
+            'payCashPart.lt' => 'En pago mixto el efectivo tiene que ser menos que el total.',
+        ], ['payCashPart' => 'efectivo']);
+
+        $order->recordPayments($this->payMethod, (float) $this->payCashPart, $this->payOtherMethod, trim((string) $this->payReference) ?: null);
+
+        $this->showPayment = false;
+        $this->changed('Forma de pago cambiada');
     }
 };
 ?>
@@ -78,27 +196,39 @@ new #[Title('Ventas')] class extends Component
 @php
     $paid = $this->paid;
     $total = (float) $paid->sum('total');
-    // Por forma de pago (un pago mixto cuenta en las dos). Incluye propinas.
-    $payments = $paid->flatMap->payments;
-    $byMethod = collect(PaymentMethod::simple())->map(fn ($m) => [
-        'method' => $m,
-        'total' => (float) $payments->where('method', $m)->sum('amount'),
-    ])->filter(fn ($m) => $m['total'] > 0);
-    $collected = (float) $payments->sum('amount');
+    // Por forma de pago (un pago mixto cuenta en las dos), sin propinas para que sume lo vendido.
+    // La propina se cobra junto con lo demás; en un pago mixto va en la parte que no es efectivo.
+    $sold = collect(PaymentMethod::simple())->mapWithKeys(fn ($m) => [$m->value => 0.0])->all();
+    foreach ($paid as $order) {
+        $tipLeft = (float) $order->tip;
+        foreach ($order->payments->sortBy(fn ($p) => $p->method === PaymentMethod::Cash ? 1 : 0) as $payment) {
+            $fromTip = min($tipLeft, (float) $payment->amount);
+            $tipLeft -= $fromTip;
+            $sold[$payment->method->value] += (float) $payment->amount - $fromTip;
+        }
+    }
+    $byMethod = collect(PaymentMethod::simple())
+        ->map(fn ($m) => ['method' => $m, 'total' => round($sold[$m->value], 2)])
+        ->filter(fn ($m) => $m['total'] > 0);
+    $collected = (float) $byMethod->sum('total');
     $tips = (float) $paid->sum('tip');
     $discounts = (float) $paid->sum('discount') + $paid->flatMap->items->sum(fn ($i) => $i->courtesyValue());
-    $cancelled = $this->orders->where('status', OrderStatus::Cancelled)->count();
+    // Canceladas con Deshacer que se volvieron a cobrar con el mismo número: son correcciones, no ventas perdidas.
+    $isCorrected = fn ($o) => $o->status === OrderStatus::Cancelled && $this->orders->contains(
+        fn ($other) => $other->status !== OrderStatus::Cancelled && $other->daily_number === $o->daily_number && BusinessDay::of($other->sold_at)->equalTo(BusinessDay::of($o->sold_at))
+    );
+    $cancelled = $this->orders->where('status', OrderStatus::Cancelled)->reject($isCorrected)->count();
     $openCount = $this->orders->where('status', OrderStatus::Open)->count();
     $isToday = $this->dayLabel === 'Hoy';
     $color = fn ($m) => $m === PaymentMethod::Cash ? 'bg-ink' : ($m === PaymentMethod::Transfer ? 'bg-naranja' : 'bg-limon');
 @endphp
 
-<div>
+<div x-data="{ paySheet: $wire.$entangle('showPayment') }">
     <x-page-header title="Ventas" tour="ventas">
         <x-slot:actions>
             <a href="{{ route('corte') }}" wire:navigate class="btn" data-tour="corte"><x-icon name="banknote" class="size-4" /> Corte</a>
         </x-slot:actions>
-        <x-date-nav :max="today()->toDateString()" data-tour="fecha" />
+        <x-date-nav :max="BusinessDay::today()->toDateString()" data-tour="fecha" />
     </x-page-header>
 
     {{-- Mientras llega el nuevo día --}}
@@ -147,21 +277,21 @@ new #[Title('Ventas')] class extends Component
             <div class="flex items-baseline justify-between px-1">
                 <h2 class="section-title">Órdenes</h2>
                 <span class="text-sm text-muted">
-                    @if ($openCount > 0) <a href="{{ route('pedidos') }}" wire:navigate class="font-semibold text-chile underline">{{ $openCount }} por cobrar</a>@endif
-                    @if ($openCount > 0 && $cancelled > 0), @endif
-                    @if ($cancelled > 0) {{ $cancelled }} {{ $cancelled === 1 ? 'cancelada' : 'canceladas' }} @endif
+                    @if ($openCount > 0)<a href="{{ route('pedidos') }}" wire:navigate class="font-semibold text-chile underline">{{ $openCount }} por cobrar</a>@endif{{ $openCount > 0 && $cancelled > 0 ? ', ' : '' }}@if ($cancelled > 0){{ $cancelled }} {{ $cancelled === 1 ? 'cancelada' : 'canceladas' }}@endif
                 </span>
             </div>
             <ul class="list">
                 @foreach ($this->orders as $order)
                     @php
                         $isCancelled = $order->status === OrderStatus::Cancelled;
+                        $corrected = $isCorrected($order);
+                        $editable = BusinessDay::isCurrent($order->countedAt());
                         $cost = $order->items->sum(fn ($i) => $i->quantity * (float) $i->unit_cost);
                     @endphp
                     <li wire:key="o-{{ $order->id }}" x-data="{ open: false }" @if ($loop->first) data-tour="orden" @endif>
                         @php
                             $isOpenOrder = $order->status === OrderStatus::Open;
-                            $summary = $order->items->map(fn ($i) => $i->quantity.' '.$i->product_name)->join(', ');
+                            $summary = $order->itemsSummary();
                         @endphp
                         <button type="button" @click="open = !open" class="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-sunken/50" :aria-expanded="open">
                             <span class="num w-8 shrink-0 text-center text-lg font-bold text-muted">{{ $order->daily_number ?? $order->number }}</span>
@@ -176,7 +306,11 @@ new #[Title('Ventas')] class extends Component
                                     @elseif ($order->payment_method && $order->payment_method !== PaymentMethod::Cash)
                                         <span class="badge bg-naranja-soft text-ink">{{ $order->payment_method->label() }}</span>
                                     @endif
-                                    @if ($isCancelled) <span class="badge bg-chile-soft text-chile">Cancelada</span> @endif
+                                    @if ($corrected)
+                                        <span class="badge bg-sunken text-muted">Corregida</span>
+                                    @elseif ($isCancelled)
+                                        <span class="badge bg-chile-soft text-chile">Cancelada</span>
+                                    @endif
                                     @if ($order->label) <span class="truncate">{{ $summary }}</span> @endif
                                 </span>
                             </span>
@@ -227,18 +361,35 @@ new #[Title('Ventas')] class extends Component
                                 @if ($order->payment_reference)
                                     <p class="text-muted">Referencia: <span class="font-semibold text-ink">{{ $order->payment_reference }}</span></p>
                                 @endif
-                                <div class="flex justify-end">
-                                    @if ($isOpenOrder)
+                                @if ($isCancelled && $order->cancelled_at)
+                                    <p class="text-muted">{{ $corrected || $order->cancel_reason === Order::CORRECTION ? 'Se canceló para corregirla' : 'Se canceló' }} a las {{ $order->cancelled_at->format('g:i a') }}.</p>
+                                @endif
+                                @if ($isOpenOrder)
+                                    <div class="flex justify-end">
                                         <a href="{{ route('vender', ['orden' => $order->id, 'cobrar' => 1]) }}" wire:navigate class="btn">Cobrar</a>
-                                    @elseif ($isCancelled)
+                                    </div>
+                                @elseif ($corrected)
+                                    <p class="text-muted">Se volvió a cobrar con el mismo número.</p>
+                                @elseif (! $editable)
+                                    {{-- Lo de otros días ya está en su corte: no se cambia. --}}
+                                    <p class="flex gap-2 text-muted"><x-icon name="lock" class="mt-0.5 size-4 shrink-0" /> Es de otro día. Si devolviste dinero, anótalo como retiro en el corte de hoy.</p>
+                                @elseif ($isCancelled)
+                                    <div class="flex justify-end">
                                         <button type="button" wire:click="restore({{ $order->id }})" class="btn">Restaurar venta</button>
-                                    @else
-                                        <button type="button" class="btn-quiet-danger -mr-2"
-                                                @click="if (await $store.confirm.ask({ title: '¿Cancelar la orden {{ $order->daily_number ?? $order->number }}?', message: 'Dejará de contar en ventas y en el corte. Puedes restaurarla después.', action: 'Cancelar orden', cancel: 'No' })) $wire.cancel({{ $order->id }})">
+                                    </div>
+                                @else
+                                    <div class="flex flex-wrap justify-end gap-2">
+                                        <button type="button" wire:click="editPayment({{ $order->id }})" class="btn">Cambiar forma de pago</button>
+                                        <button type="button" class="btn"
+                                                @click="if (await $store.confirm.ask({ title: @js('¿Corregir la venta #'.$order->daily_number.'?'), message: 'Se cancela y el pedido se abre en Vender con todo, para agregar o quitar productos y cobrarlo de nuevo. Conserva su número y su lugar en la cocina.', action: 'Corregir', cancel: 'No', danger: false })) $wire.correct({{ $order->id }})">
+                                            <x-icon name="pencil" class="size-4" /> Corregir pedido
+                                        </button>
+                                        <button type="button" class="btn-quiet-danger"
+                                                @click="if (await $store.confirm.ask({ title: @js('¿Cancelar la venta #'.$order->daily_number.'?'), message: 'Dejará de contar en ventas y en el corte. Si ya te pagaron, devuelve el dinero.', action: 'Cancelar venta', cancel: 'No' })) $wire.cancel({{ $order->id }})">
                                             <x-icon name="x" class="size-4" /> Cancelar venta
                                         </button>
-                                    @endif
-                                </div>
+                                    </div>
+                                @endif
                             </div>
                         </div>
                     </li>
@@ -255,4 +406,40 @@ new #[Title('Ventas')] class extends Component
             </x-empty>
         @endif
     </div>
+    {{-- Cambiar forma de pago: el error más común al cobrar; no cancela la venta ni toca la cocina. --}}
+    <x-sheet title="Forma de pago" open="paySheet">
+        <form wire:submit="savePayment" id="payment-form" class="space-y-4">
+            @if ($payOrder = $this->payOrder)
+                <p class="text-sm text-muted">Venta #{{ $payOrder->daily_number }}{{ $payOrder->label ? ' '.$payOrder->label : '' }} por <span class="num text-base font-semibold text-ink">{{ money((float) $payOrder->total + (float) $payOrder->tip) }}</span>{{ (float) $payOrder->tip > 0 ? ', con propina' : '' }}.</p>
+            @endif
+            <div class="segmented" role="group" aria-label="Forma de pago">
+                <button type="button" @click="$wire.payMethod = 'cash'" :aria-pressed="$wire.payMethod === 'cash'">Efectivo</button>
+                <button type="button" @click="$wire.payMethod = 'transfer'" :aria-pressed="$wire.payMethod === 'transfer'">Transf.</button>
+                <button type="button" @click="$wire.payMethod = 'card'" :aria-pressed="$wire.payMethod === 'card'">Tarjeta</button>
+                <button type="button" @click="$wire.payMethod = 'mixed'" :aria-pressed="$wire.payMethod === 'mixed'">Mixto</button>
+            </div>
+            <div x-show="$wire.payMethod === 'mixed'" x-cloak class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="label" for="pay-cash-part">En efectivo</label>
+                    <x-money-input id="pay-cash-part" wire:model="payCashPart" placeholder="0" />
+                    @error('payCashPart') <p class="error">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <p class="label">El resto con</p>
+                    <div class="segmented" role="group" aria-label="Resto con">
+                        <button type="button" @click="$wire.payOtherMethod = 'transfer'" :aria-pressed="$wire.payOtherMethod === 'transfer'">Transf.</button>
+                        <button type="button" @click="$wire.payOtherMethod = 'card'" :aria-pressed="$wire.payOtherMethod === 'card'">Tarjeta</button>
+                    </div>
+                </div>
+            </div>
+            <div x-show="$wire.payMethod !== 'cash'" x-cloak>
+                <label class="label" for="pay-reference">Referencia <span class="font-normal text-muted">(opcional)</span></label>
+                <input id="pay-reference" type="text" wire:model="payReference" maxlength="255" class="input" placeholder="Folio o últimos dígitos">
+            </div>
+            <p class="hint">El corte de hoy se ajusta solo: si cambia lo que entró en efectivo, revisa la caja.</p>
+        </form>
+        <x-slot:footer>
+            <button type="submit" form="payment-form" wire:loading.attr="disabled" wire:target="savePayment" class="btn-primary btn-lg w-full">Guardar forma de pago</button>
+        </x-slot:footer>
+    </x-sheet>
 </div>

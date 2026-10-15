@@ -25,7 +25,7 @@ const modules = `
 const tours = {
     vender: [
         {
-            title: 'Bienvenido a {negocio}',
+            title: 'Te damos la bienvenida a {negocio}',
             text: 'Esta app lleva las ventas, los pedidos, los gastos y la ganancia del negocio. En un par de minutos te enseño a tomar un pedido y dónde está cada cosa. Si ya la conoces, toca Omitir.',
         },
         {
@@ -45,12 +45,12 @@ const tours = {
         },
         {
             el: 'pedido-panel',
-            media: 'desktop',
+            media: 'wide',
             title: 'El pedido',
             text: 'Aquí se va armando lo que pidió el cliente, con el total. Cuando termines, toca Continuar para cobrarlo o guardarlo.',
         },
         {
-            media: 'mobile',
+            media: 'narrow',
             title: 'El pedido',
             text: 'Al agregar productos aparece abajo una barra roja con cuántas piezas llevas y el total. Tócala para ver el pedido completo y cobrarlo. Te enseño qué hay ahí.',
         },
@@ -94,7 +94,7 @@ const tours = {
             el: 'cobrar',
             open: 'pedido',
             title: 'Cobrar o guardar',
-            text: 'Cobrar registra la venta y la pasa a Pedidos para entregarla. Guardar sin cobrar lo deja apartado con su nombre, para cuando el cliente pague al final. Si te equivocas al cobrar, tienes 10 minutos para tocar Deshacer.',
+            text: 'Cobrar registra la venta y la pasa a Pedidos para entregarla. Guardar sin cobrar lo deja apartado con su nombre, para cuando el cliente pague al final. Si te equivocas al cobrar, toca Deshacer en el aviso que sale unos segundos. Si ya se fue, en Ventas abre la venta: ahí puedes cambiar la forma de pago o corregir el pedido.',
         },
         {
             el: 'nav-pedidos',
@@ -104,7 +104,7 @@ const tours = {
         {
             el: 'nav-ventas',
             title: 'Ventas',
-            text: 'Todo lo cobrado, día por día: cuánto se vendió, cuánto entró en efectivo y cuánto por transferencia o tarjeta, y el detalle de cada orden. Si una venta estuvo mal, ahí la cancelas.',
+            text: 'Todo lo cobrado, día por día: cuánto se vendió, cuánto entró en efectivo y cuánto por transferencia o tarjeta, y el detalle de cada orden. Si una venta estuvo mal, ahí la corriges.',
         },
         {
             el: 'nav-gastos',
@@ -143,7 +143,7 @@ const tours = {
         {
             el: 'pedido-acciones',
             title: 'Entregar o cobrar',
-            text: 'Entregado lo quita de la lista cuando se lo das al cliente. Si está por cobrar, Cobrar abre el pedido para recibir el pago, y en el menú ··· puedes editarlo o cancelarlo. Los de domicilio primero se marcan con Enviar, cuando salen con el repartidor.',
+            text: 'Entregado lo quita de la lista cuando se lo das al cliente. Los de comer aquí ya cobrados salen solos cuando la cocina los marca Listo. Si está por cobrar, Cobrar abre el pedido para recibir el pago, y en el menú ··· puedes editarlo o cancelarlo. Los de domicilio primero se marcan con Enviar, cuando salen con el repartidor.',
         },
         {
             el: 'pedidos-vacio',
@@ -213,7 +213,7 @@ const tours = {
         {
             el: 'orden',
             title: 'Cada orden',
-            text: 'Tócala para ver sus productos, cómo se pagó y cuánto dejó según la receta. Ahí también puedes cancelar una venta mal hecha: deja de contar en ventas y en el corte, y se puede restaurar.',
+            text: 'Tócala para ver sus productos, cómo se pagó y cuánto dejó según la receta. Si se cobró mal, ahí puedes cambiar la forma de pago, corregir el pedido (se abre en Vender para cobrarlo de nuevo) o cancelarla. Solo las de hoy: lo de otros días ya está en su corte.',
         },
         {
             el: 'ventas-vacio',
@@ -436,6 +436,11 @@ const tours = {
             text: 'El empaque se suma una vez a cada pedido para llevar o a domicilio. El envío es lo que cobras normalmente por llevarlo; en cada pedido se puede cambiar. Deja 0 si no cobras.',
         },
         {
+            el: 'ajustes-dia',
+            title: 'Día de trabajo',
+            text: 'Si cierras después de medianoche, elige la hora en que termina tu día. Así lo que vendes a la 1 de la mañana cuenta en el mismo día, el corte sale completo y los números de pedido no empiezan de nuevo a media noche.',
+        },
+        {
             el: 'ajustes-contrasena',
             title: 'Contraseña',
             text: 'Al cambiarla se cierra la sesión en los demás celulares o computadoras.',
@@ -451,6 +456,9 @@ const tours = {
 const selector = (name) => `[data-tour="${name}"]`;
 const visible = (name) => [...document.querySelectorAll(selector(name))].find((el) => el.getClientRects().length > 0);
 const isDesktop = () => window.matchMedia('(min-width: 768px)').matches;
+// El panel del pedido en Vender va al lado desde 1024 px; antes se usa la barra "Ver pedido".
+const isWide = () => window.matchMedia('(min-width: 1024px)').matches;
+const fitsScreen = (media) => !media || ({ desktop: isDesktop(), mobile: !isDesktop(), wide: isWide(), narrow: !isWide() })[media];
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const escapeHtml = (text) => text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -502,7 +510,7 @@ export async function startTour(key, { auto = false } = {}) {
 
     const business = escapeHtml(document.body.dataset.business ?? '');
     const steps = (tours[key] ?? [])
-        .filter((s) => !s.media || (s.media === 'desktop') === isDesktop())
+        .filter((s) => fitsScreen(s.media))
         .filter((s) => !s.el || s.open || visible(s.el))
         .map((s) => ({
             element: s.el ? () => visible(s.el) : undefined,
@@ -588,9 +596,13 @@ document.addEventListener('livewire:navigated', () => {
     const url = new URL(location.href);
 
     if (url.searchParams.get('recorrido') === key) {
-        url.searchParams.delete('recorrido');
-        history.replaceState(history.state, '', url);
-        setTimeout(() => startTour(key), 400);
+        // Se limpia la dirección después: Livewire reescribe la URL al arrancar y volvía a poner ?recorrido=.
+        setTimeout(() => {
+            const clean = new URL(location.href);
+            clean.searchParams.delete('recorrido');
+            history.replaceState(history.state, '', clean);
+            startTour(key);
+        }, 400);
         return;
     }
 

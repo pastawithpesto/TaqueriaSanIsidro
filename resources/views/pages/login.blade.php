@@ -18,14 +18,19 @@ new #[Layout('layouts::guest')] #[Title('Entrar')] class extends Component
 
     public function login(): void
     {
+        // Los correos se guardan en minúsculas: "Angel@..." del teclado del celular también entra.
+        $this->email = Str::lower(trim($this->email));
+
         $this->validate([
             'email' => ['required', 'email'],
             'password' => ['required'],
         ]);
 
+        $email = $this->email;
+
         // [intentos, segundos de espera]: por correo y equipo, y por equipo con cualquier correo.
         $limits = [
-            'login|'.Str::lower($this->email).'|'.request()->ip() => [5, 300],
+            'login|'.$email.'|'.request()->ip() => [5, 300],
             'login|'.request()->ip() => [20, 3600],
         ];
 
@@ -37,7 +42,7 @@ new #[Layout('layouts::guest')] #[Title('Entrar')] class extends Component
             }
         }
 
-        if (! Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
+        if (! Auth::attempt(['email' => $email, 'password' => $this->password], $this->remember)) {
             foreach ($limits as $key => [, $decay]) {
                 RateLimiter::hit($key, $decay);
             }

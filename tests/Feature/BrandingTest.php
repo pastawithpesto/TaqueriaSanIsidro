@@ -66,6 +66,19 @@ class BrandingTest extends TestCase
         $this->get('/')->assertSee('Tacos El Güero');
     }
 
+    public function test_saving_the_name_reloads_the_menu_and_keeps_the_notice(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test('pages::ajustes')
+            ->set('name', 'Tacos El Güero')
+            ->set('short_name', 'El Güero')
+            ->call('saveBusiness')
+            ->assertRedirect(route('ajustes'));
+
+        $this->withSession(['toast' => 'Nombre guardado'])->get('/ajustes')->assertSee('Nombre guardado');
+    }
+
     public function test_name_is_required(): void
     {
         $this->actingAs(User::factory()->create());

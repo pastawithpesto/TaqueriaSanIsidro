@@ -10,7 +10,8 @@
         parse(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); },
         iso(d) { return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); },
         get label() {
-            const d = this.parse(this.date), today = new Date(); today.setHours(0, 0, 0, 0);
+            {{-- Hoy es el día de trabajo que manda el servidor (max): de madrugada puede ser la fecha de ayer. --}}
+            const d = this.parse(this.date), today = this.max ? this.parse(this.max) : new Date(); today.setHours(0, 0, 0, 0);
             const diff = Math.round((today - d) / 86400000);
             if (diff === 0) return 'Hoy';
             if (diff === 1) return 'Ayer';

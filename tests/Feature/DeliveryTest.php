@@ -36,8 +36,8 @@ class DeliveryTest extends TestCase
 
     public function test_delivery_requires_an_address(): void
     {
-        $this->delivery()->call('saveOpen')->assertReturned(['ok' => false, 'error' => 'Escribe la dirección de entrega.']);
-        $this->delivery()->call('charge')->assertReturned(['ok' => false, 'error' => 'Escribe la dirección de entrega.']);
+        $this->delivery()->call('saveOpen')->assertReturned(['ok' => false, 'error' => 'Escribe la dirección de entrega.', 'field' => 'address']);
+        $this->delivery()->call('charge')->assertReturned(['ok' => false, 'error' => 'Escribe la dirección de entrega.', 'field' => 'address']);
 
         $this->assertSame(0, Order::count());
     }
@@ -79,6 +79,17 @@ class DeliveryTest extends TestCase
 
         Livewire::test('pages::pedidos')->assertSee('En camino')->call('deliver', $order->id);
         $this->assertSame([], Order::pending()->pluck('id')->all());
+    }
+
+    public function test_dispatched_order_leaves_the_kitchen(): void
+    {
+        $this->delivery()->set('address', 'Calle 5')->set('label', 'Doña Mary')->call('charge');
+        $order = Order::sole();
+
+        Livewire::test('pages::pedidos')->call('dispatchOrder', $order->id);
+
+        $this->assertNotNull($order->fresh()->ready_at);
+        Livewire::test('pages::cocina')->assertSet('queue', fn ($queue) => $queue->isEmpty());
     }
 
     public function test_editing_an_open_delivery_order_keeps_its_address(): void

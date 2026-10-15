@@ -3,6 +3,7 @@
 use App\Enums\ExpenseCategory;
 use App\Models\Expense;
 use App\Models\Ingredient;
+use App\Support\BusinessDay;
 use Carbon\CarbonImmutable;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
@@ -35,8 +36,8 @@ new #[Title('Gastos')] class extends Component
 
     public function mount(): void
     {
-        $this->month = today()->format('Y-m');
-        $this->spent_on = today()->toDateString();
+        $this->month = BusinessDay::today()->format('Y-m');
+        $this->spent_on = BusinessDay::today()->toDateString();
     }
 
     protected function start(): CarbonImmutable
@@ -112,7 +113,7 @@ new #[Title('Gastos')] class extends Component
         $this->reset('showForm', 'editingId', 'ingredient_id', 'description', 'supplier', 'quantity', 'total');
         $this->category = 'ingredients';
         $this->from_cash = true;
-        $this->spent_on = today()->toDateString();
+        $this->spent_on = BusinessDay::today()->toDateString();
         $this->resetErrorBag();
     }
 
@@ -132,7 +133,7 @@ new #[Title('Gastos')] class extends Component
             'quantity' => [$this->ingredient_id ? 'required' : 'nullable', 'numeric', 'gt:0', 'max:999999'],
             'total' => ['required', 'numeric', 'gt:0', 'max:9999999'],
             'from_cash' => ['boolean'],
-        ]);
+        ], attributes: ['total' => 'total pagado', 'spent_on' => 'fecha', 'ingredient_id' => 'insumo']);
 
         $previousIngredient = $this->editingId ? Expense::whereKey($this->editingId)->value('ingredient_id') : null;
         $expense = Expense::updateOrCreate(['id' => $this->editingId], $data + ['user_id' => auth()->id()]);
@@ -312,12 +313,22 @@ new #[Title('Gastos')] class extends Component
                 <p class="hint" x-show="unitPrice" x-cloak>Sale a <span class="font-semibold text-ink" x-text="unitPrice"></span>. Se guardará como costo del insumo.</p>
             </div>
 
+            {{-- Junto al total para que se elija a conciencia: lo que sale de la caja se descuenta en el corte. --}}
+            <div>
+                <p class="label">¿Con qué dinero se pagó?</p>
+                <div class="segmented" role="group" aria-label="Con qué dinero se pagó">
+                    <button type="button" @click="$wire.from_cash = true" :aria-pressed="$wire.from_cash">De la caja</button>
+                    <button type="button" @click="$wire.from_cash = false" :aria-pressed="! $wire.from_cash">De otro lado</button>
+                </div>
+                <p class="hint" x-text="$wire.from_cash ? 'Se descuenta del efectivo en el corte de ese día.' : 'Por ejemplo, de tu bolsa o del banco. No toca el corte.'"></p>
+            </div>
+
             <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label class="label" for="supplier">Proveedor <span class="font-normal text-muted">(opcional)</span></label>
                     <input id="supplier" type="text" list="suppliers" wire:model="supplier" class="input" maxlength="255">
                     <datalist id="suppliers">
-                        @foreach ($this->suppliers as $s) <option value="{{ $s }}"> @endforeach
+                        @foreach ($this->suppliers as $s) <option value="{{ $s }}"></option> @endforeach
                     </datalist>
                     @error('supplier') <p class="error">{{ $message }}</p> @enderror
                 </div>
@@ -333,14 +344,6 @@ new #[Title('Gastos')] class extends Component
                 <input id="description" type="text" wire:model="description" class="input" maxlength="255">
                 @error('description') <p class="error">{{ $message }}</p> @enderror
             </div>
-
-            <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
-                <span>
-                    <span class="block font-semibold">Se pagó con dinero de la caja</span>
-                    <span class="block text-sm text-muted">Se descuenta del efectivo en el corte.</span>
-                </span>
-                <input type="checkbox" wire:model="from_cash" class="switch">
-            </label>
         </form>
 
         <x-slot:footer>

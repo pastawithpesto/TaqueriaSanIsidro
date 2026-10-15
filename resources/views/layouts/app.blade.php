@@ -16,7 +16,7 @@
         ['ajustes', 'Ajustes', 'settings'],
     ];
     $moreActive = collect($more)->contains(fn ($l) => request()->routeIs($l[0]));
-    $pendingCount = \App\Models\Order::pending()->count();
+    $pendingCount = \App\Models\Order::pendingCount();
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
@@ -40,7 +40,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-dvh antialiased" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}">
+<body class="min-h-dvh antialiased" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-pending="{{ $pendingCount }}">
     <div id="busy" aria-hidden="true"></div>
 
     <div class="md:grid md:min-h-dvh md:grid-cols-[15.5rem_1fr]">
@@ -53,7 +53,7 @@
                 </a>
                 <nav class="flex flex-col gap-0.5" aria-label="Principal">
                     @foreach ($main as [$route, $label, $icon])
-                        <x-nav-link :route="$route" :icon="$icon" :count="$route === 'pedidos' ? $pendingCount : 0" data-tour="nav-{{ $route }}">{{ $label }}</x-nav-link>
+                        <x-nav-link :route="$route" :icon="$icon" :pending="$route === 'pedidos'" data-tour="nav-{{ $route }}">{{ $label }}</x-nav-link>
                     @endforeach
                     <div class="flex flex-col gap-0.5" data-tour="nav-admin">
                         <p class="mt-5 mb-1.5 px-3 text-xs font-medium text-panel-muted/80">Administración</p>
@@ -80,7 +80,7 @@
     </div>
 
     {{-- Navegación inferior (celular) --}}
-    <div x-data="{ more: false }" class="md:hidden">
+    <div x-data="{ more: false }" x-effect="more ? backButton.opened('more', () => more = false) : backButton.closed('more')" class="md:hidden">
         <nav class="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md" aria-label="Principal">
             @foreach ($main as [$route, $label, $icon])
                 @php $active = request()->routeIs($route); @endphp
@@ -89,8 +89,8 @@
                    @if ($active) aria-current="page" @endif>
                     <span class="relative flex h-7 w-14 items-center justify-center rounded-full {{ $active ? 'bg-limon text-on-limon' : '' }}">
                         <x-icon :name="$icon" class="size-[22px]" />
-                        @if ($route === 'pedidos' && $pendingCount > 0)
-                            <span class="num absolute -top-1.5 right-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-chile px-1 text-xs text-white ring-2 ring-surface">{{ $pendingCount }}</span>
+                        @if ($route === 'pedidos')
+                            <span x-show="$store.pending > 0" x-cloak x-text="$store.pending" class="num absolute -top-1.5 right-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-chile px-1 text-xs text-white ring-2 ring-surface"></span>
                         @endif
                     </span>
                     {{ $label }}
@@ -120,7 +120,8 @@
                     </div>
                 </div>
                 @foreach ($more as [$route, $label, $icon])
-                    <a href="{{ route($route) }}" wire:navigate @click="more = false"
+                    {{-- Primero se quita la entrada del menú en el historial y luego se navega: si no, atrás regresaría al menú. --}}
+                    <a href="{{ route($route) }}" @click.prevent="backButton.closed('more').then(() => Livewire.navigate($el.href)); more = false"
                        class="flex min-h-14 items-center gap-4 rounded-xl px-3 text-base font-semibold hover:bg-sunken {{ request()->routeIs($route) ? 'bg-sunken' : '' }}">
                         <x-icon :name="$icon" class="size-[22px] text-muted" />
                         {{ $label }}
@@ -146,17 +147,27 @@
             },
          }"
          @toast.window="push($event.detail)"
-         class="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[90] flex flex-col items-center gap-2 px-4 md:bottom-6"
+         {{-- Arriba: abajo tapaban la barra del pedido y los botones de los cuadros. --}}
+         class="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[90] flex flex-col items-center gap-2 px-4 md:top-6"
          aria-live="polite">
+        {{-- Se cierran solos o al tocarlos, por si tapan algo. --}}
         <template x-for="t in items" :key="t.id">
-            <div class="sheet-in pointer-events-auto flex max-w-sm items-center gap-2.5 rounded-xl py-3 pr-4 pl-3 text-sm font-semibold shadow-xl"
-                 :class="t.type === 'error' ? 'bg-chile text-white' : 'bg-ink text-bg'">
+            <button type="button" @click="items = items.filter(i => i.id !== t.id)"
+                    class="toast-in pointer-events-auto flex max-w-sm items-center gap-2.5 rounded-xl py-3 pr-3 pl-3 text-left text-sm font-semibold shadow-xl"
+                    :class="t.type === 'error' ? 'bg-chile text-white' : 'bg-ink text-bg'">
                 <span x-show="t.type !== 'error'"><x-icon name="check" class="size-4 text-salsa" /></span>
                 <span x-show="t.type === 'error'"><x-icon name="alert" class="size-4" /></span>
                 <span x-text="t.message"></span>
-            </div>
+                <span class="ml-1 opacity-60" aria-hidden="true"><x-icon name="x" class="size-4" /></span>
+                <span class="sr-only">Cerrar aviso</span>
+            </button>
         </template>
     </div>
+
+    {{-- Aviso que dejó la pantalla anterior antes de recargar el encabezado (ver Ajustes). --}}
+    @if (session('toast'))
+        <div x-data x-init="$nextTick(() => $dispatch('toast', { message: @js(session('toast')) }))"></div>
+    @endif
 
     {{-- Confirmación de acciones importantes --}}
     <div x-data x-show="$store.confirm.open" x-cloak
