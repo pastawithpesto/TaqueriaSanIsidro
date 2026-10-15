@@ -37,7 +37,7 @@ class Consumption
                 continue;
             }
 
-            $day = CarbonImmutable::parse($item->sold_at)->toDateString();
+            $day = BusinessDay::of(CarbonImmutable::parse($item->sold_at))->toDateString();
             $without = collect($item->modifiers ?? [])->where('type', 'without')->pluck('id')->all();
             $extraIds = collect($item->modifiers ?? [])->where('type', 'extra')->pluck('id')->all();
             $usage = $days->get($day, []);
@@ -69,7 +69,7 @@ class Consumption
      */
     public static function forecast(CarbonImmutable $date): array
     {
-        $byDay = static::byDay($date->subWeeks(4)->startOfDay(), $date->subDay()->endOfDay());
+        $byDay = static::byDay(BusinessDay::start($date->subWeeks(4)), BusinessDay::end($date->subDay()));
 
         $sameWeekday = $byDay->filter(fn ($u, $day) => CarbonImmutable::parse($day)->dayOfWeek === $date->dayOfWeek);
         $sample = $sameWeekday->isNotEmpty() ? $sameWeekday : $byDay->sortKeysDesc()->take(14);

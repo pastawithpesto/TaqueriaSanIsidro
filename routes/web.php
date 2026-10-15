@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\BrandingController;
+use App\Models\Order;
 use App\Support\Tours;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -18,6 +19,8 @@ Route::middleware('auth')->group(function () {
     Route::livewire('/compras', 'pages::compras')->name('compras');
     Route::livewire('/corte', 'pages::corte')->name('corte');
     Route::livewire('/pedidos', 'pages::pedidos')->name('pedidos');
+    // El contador de Pedidos del menú lo consulta cada tanto para ver lo que se vende en otro celular.
+    Route::get('/pedidos/pendientes', fn () => ['count' => Order::pendingCount()])->name('pedidos.pending');
     Route::livewire('/cocina', 'pages::cocina')->name('cocina');
     Route::livewire('/ventas', 'pages::ventas')->name('ventas');
     Route::livewire('/gastos', 'pages::gastos')->name('gastos');

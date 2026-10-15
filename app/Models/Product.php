@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\BusinessDay;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -26,7 +27,7 @@ class Product extends Model
 
     public function isSoldOut(): bool
     {
-        return $this->sold_out_on?->isToday() ?? false;
+        return $this->sold_out_on?->isSameDay(BusinessDay::today()) ?? false;
     }
 
     public function optionGroups(): HasMany

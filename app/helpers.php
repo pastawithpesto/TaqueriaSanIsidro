@@ -3,7 +3,7 @@
 use Illuminate\Support\Number;
 
 if (! function_exists('money')) {
-    /** Pesos sin centavos cuando son exactos: $20, $39.50, $1,342.16. */
+    /** Pesos sin centavos cuando son exactos: $20, $39.50, $1,342.16. Los negativos con signo menos: −$15. */
     function money(float|int|string|null $amount): string
     {
         $amount = round((float) $amount, 2);
@@ -13,6 +13,8 @@ if (! function_exists('money')) {
             $amount = 0.0;
         }
 
-        return Number::currency($amount, precision: fmod(abs($amount), 1) < 0.005 ? 0 : 2);
+        $formatted = Number::currency(abs($amount), precision: fmod(abs($amount), 1) < 0.005 ? 0 : 2);
+
+        return $amount < 0 ? '−'.$formatted : $formatted;
     }
 }

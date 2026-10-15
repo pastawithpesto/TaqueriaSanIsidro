@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
+use App\Support\BusinessDay;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at'])]
+#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
 class Order extends Model
 {
     protected function casts(): array
@@ -30,6 +31,8 @@ class Order extends Model
             'ready_at' => 'datetime',
             'paid_at' => 'datetime',
             'delivered_at' => 'datetime',
+            'cancelled_at' => 'datetime',
+            'changed_at' => 'datetime',
         ];
     }
 
@@ -50,13 +53,15 @@ class Order extends Model
 
     /**
      * Pedidos activos: todo lo que está por cobrar (aunque ya se haya entregado)
-     * y lo pagado hoy que falta entregar.
+     * y lo pagado hoy que falta entregar. Un pedido para comer aquí ya cobrado sale en cuanto la cocina
+     * lo marca Listo (no hay nada que entregar a mano); la cocina pide $includeReadyHere para seguir viéndolo.
      */
-    public function scopePending(Builder $query): void
+    public function scopePending(Builder $query, bool $includeReadyHere = false): void
     {
-        $query->where(function (Builder $q) {
+        $query->where(function (Builder $q) use ($includeReadyHere) {
             $q->where('status', OrderStatus::Open)
-                ->orWhere(fn (Builder $q) => $q->where('status', OrderStatus::Paid)->whereNull('delivered_at')->whereRaw('COALESCE(paid_at, sold_at) >= ?', [today()]));
+                ->orWhere(fn (Builder $q) => $q->where('status', OrderStatus::Paid)->whereNull('delivered_at')->whereRaw('COALESCE(paid_at, sold_at) >= ?', [BusinessDay::startOfToday()])
+                    ->when(! $includeReadyHere, fn (Builder $q) => $q->whereRaw("(COALESCE(service, '') <> 'here' OR ready_at IS NULL)")));
         });
     }
 
@@ -126,9 +131,70 @@ class Order extends Model
         };
     }
 
+    /**
+     * Reemplaza los pagos de la venta (total más propina): todo con un método o, en mixto,
+     * una parte en efectivo y el resto con transferencia o tarjeta.
+     */
+    public function recordPayments(string $method, ?float $cashPart = null, string $otherMethod = 'transfer', ?string $reference = null): void
+    {
+        $due = round((float) $this->total + (float) $this->tip, 2);
+        $reference = $method === 'cash' ? null : $reference;
+
+        if ($method === 'mixed') {
+            $cash = round(min($due, max(0, (float) $cashPart)), 2);
+            $payments = array_values(array_filter([
+                ['method' => 'cash', 'amount' => $cash, 'reference' => null],
+                ['method' => $otherMethod, 'amount' => round($due - $cash, 2), 'reference' => $reference],
+            ], fn ($p) => $p['amount'] > 0));
+        } else {
+            $payments = [['method' => $method, 'amount' => $due, 'reference' => $reference]];
+        }
+
+        $this->update(['payment_method' => $method, 'payment_reference' => $reference]);
+        $this->payments()->delete();
+        $this->payments()->createMany($payments);
+    }
+
+    /** Motivo de una venta que se canceló para corregirla y cobrarla de nuevo. */
+    public const CORRECTION = 'correccion';
+
+    /** Cancela dejando rastro de cuándo y por qué. */
+    public function cancel(?string $reason = null): void
+    {
+        $this->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => now(), 'cancel_reason' => $reason]);
+    }
+
+    /**
+     * Venta cancelada con Deshacer que se volvió a cobrar con el mismo número.
+     * Restaurarla duplicaría la venta.
+     */
+    public function wasCorrected(): bool
+    {
+        return $this->status === OrderStatus::Cancelled
+            && static::whereKeyNot($this->id)
+                ->where('daily_number', $this->daily_number)
+                ->where('status', '!=', OrderStatus::Cancelled)
+                ->whereBetween('sold_at', [BusinessDay::start(BusinessDay::of($this->sold_at)), BusinessDay::end(BusinessDay::of($this->sold_at))])
+                ->exists();
+    }
+
+    /** "3 Hamburguesa combo, 1 Torta": junta las partidas del mismo producto aunque lleven indicaciones distintas. */
+    public function itemsSummary(): string
+    {
+        return $this->items->groupBy('product_name')
+            ->map(fn ($items, $name) => $items->sum('quantity').' '.$name)
+            ->join(', ');
+    }
+
+    /** Lo que muestra el contador de Pedidos: los activos de hoy en adelante, sin los sin cobrar de días anteriores. */
+    public static function pendingCount(): int
+    {
+        return static::pending()->dueBetween(BusinessDay::startOfToday())->count();
+    }
+
     /** Número consecutivo del día (#1, #2...) para llamar el pedido. */
     public static function nextDailyNumber(): int
     {
-        return (int) static::where('sold_at', '>=', today())->max('daily_number') + 1;
+        return (int) static::where('sold_at', '>=', BusinessDay::startOfToday())->max('daily_number') + 1;
     }
 }
