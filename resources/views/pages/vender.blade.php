@@ -673,7 +673,9 @@ new #[Title('Vender')] class extends Component
             const s = x => [...(x ?? [])].map(Number).sort().join('.');
             return a.product_id == b.product_id && !! a.courtesy === !! b.courtesy && s(a.without) === s(b.without) && s(a.extras) === s(b.extras) && s(a.choices) === s(b.choices) && (a.notes ?? '').trim().toLowerCase() === (b.notes ?? '').trim().toLowerCase();
         },
-        needsChoice(pid) { return (this.catalog[pid]?.options ?? []).some(g => g.required) },
+        // Se pregunta solo si hay que escoger entre varias opciones. Con una sola (siempre Coca-Cola) ya va incluida: autoChoices.
+        needsChoice(pid) { return (this.catalog[pid]?.options ?? []).some(g => g.required && g.choices.length > 1) },
+        autoChoices(pid) { return (this.catalog[pid]?.options ?? []).filter(g => g.required && g.choices.length === 1).map(g => g.choices[0]) },
         qtyOf(pid) { return this.list().filter(l => l.product_id == pid).reduce((n, l) => n + l.qty, 0) },
         tap(pid) {
             if (this.stock) return this.toggleStock(pid);
@@ -727,13 +729,14 @@ new #[Title('Vender')] class extends Component
         unit(l) {
             if (l.courtesy) return 0;
             const p = this.catalog[l.product_id];
-            const choicePrice = (l.choices ?? []).reduce((t, id) => t + (p?.options.flatMap(g => g.choices).find(c => c.id == id)?.price ?? 0), 0);
+            const choicePrice = (l.choices ?? []).reduce((t, id) => t + (p?.options.flatMap(g => g.choices).find(c => c.id == id)?.price ?? 0), 0)
+                + this.autoChoices(l.product_id).filter(c => ! (l.choices ?? []).some(x => x == c.id)).reduce((t, c) => t + c.price, 0);
             return (p?.price ?? 0) + choicePrice + (l.extras ?? []).reduce((t, id) => t + (p?.extras.find(e => e.id == id)?.price ?? 0), 0);
         },
         mods(l) {
             const p = this.catalog[l.product_id];
             return {
-                choices: (l.choices ?? []).map(id => p?.options.flatMap(g => g.choices).find(c => c.id == id)?.name).filter(Boolean),
+                choices: [...this.autoChoices(l.product_id).filter(c => ! (l.choices ?? []).some(x => x == c.id)).map(c => c.name), ...(l.choices ?? []).map(id => p?.options.flatMap(g => g.choices).find(c => c.id == id)?.name)].filter(Boolean),
                 without: (l.without ?? []).map(id => 'Sin ' + (p?.without.find(w => w.id == id)?.name ?? '').toLowerCase()),
                 extras: (l.extras ?? []).map(id => p?.extras.find(e => e.id == id)?.name).filter(Boolean),
                 notes: (l.notes ?? '').trim(),
@@ -802,7 +805,7 @@ new #[Title('Vender')] class extends Component
         },
         saveEdit() {
             const e = this.editor;
-            const missing = (this.catalog[e.product_id]?.options ?? []).filter(g => g.required && ! e.choices[g.id]);
+            const missing = (this.catalog[e.product_id]?.options ?? []).filter(g => g.required && g.choices.length > 1 && ! e.choices[g.id]);
             if (missing.length) return e.error = 'Elige ' + missing.map(g => g.name.toLowerCase()).join(' y ') + '.';
             const lines = this.list().map(l => ({ ...l }));
             const edited = { product_id: e.product_id, qty: e.count, without: e.without, extras: e.extras, choices: Object.values(e.choices).filter(Boolean), notes: e.notes.trim(), courtesy: !! e.courtesy };
@@ -820,9 +823,21 @@ new #[Title('Vender')] class extends Component
             this.editor = null;
             if (e.isNew) { navigator.vibrate?.(8); this.$nextTick(() => bump(document.getElementById('q-' + pid))) }
         },
-        clear() { $wire.lines = []; $wire.received = null; $wire.reference = null; this.emptied(); this.clearDraft(); this.unstashDraft() },
+        // Limpiar deja Vender como recién abierto: sin productos, nombre, servicio, descuento, propina ni forma de pago.
+        // Si se está editando un pedido guardado, solo se quitan sus productos (para salir de la edición está Salir).
+        clear() {
+            const editing = !! $wire.orderId;
+            $wire.lines = []; $wire.received = null; $wire.reference = null;
+            this.emptied(); this.clearDraft(); this.unstashDraft();
+            if (! editing) { this.later = false; this.discOpen = false; this.error = ''; $wire.cancelEdit() }
+        },
         async confirmClear() {
-            if (await this.$store.confirm.ask({ title: '¿Vaciar el pedido?', message: 'Se quitarán ' + this.count() + (this.count() === 1 ? ' producto.' : ' productos.'), action: 'Vaciar' })) this.clear();
+            if (! this.count()) return;
+            const editing = !! $wire.orderId, n = this.count();
+            const message = editing
+                ? 'Se quitarán ' + n + (n === 1 ? ' producto' : ' productos') + ' de este pedido.'
+                : 'Se borra todo para empezar de nuevo: ' + n + (n === 1 ? ' producto' : ' productos') + ', nombre, descuento y forma de pago.';
+            if (await this.$store.confirm.ask({ title: '¿Limpiar el pedido?', message, action: 'Limpiar' })) this.clear();
         },
         // Lleva la vista al campo con el problema: el aviso sale en el pie y el campo puede estar fuera de vista.
         focusField(id) {
@@ -961,7 +976,7 @@ new #[Title('Vender')] class extends Component
             <div class="card space-y-3 !p-5">
                 <div class="flex items-center justify-between">
                     <h2 class="section-title">Pedido</h2>
-                    <button type="button" x-show="count() > 0" x-cloak @click="confirmClear()" class="btn-quiet -mr-2">Vaciar</button>
+                    <button type="button" x-show="count() > 0" x-cloak @click="confirmClear()" class="btn-quiet -mr-2"><x-icon name="trash" class="size-4" /> Limpiar</button>
                 </div>
                 <div x-show="count() === 0" class="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted">
                     <x-icon name="ticket" class="size-7 opacity-60" />
@@ -984,9 +999,14 @@ new #[Title('Vender')] class extends Component
         <div x-show="count() > 0" x-cloak
              x-transition:enter="transition duration-200 ease-out" x-transition:enter-start="translate-y-4 opacity-0"
              x-transition:leave="transition duration-150 ease-in" x-transition:leave-end="translate-y-4 opacity-0"
-             class="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 md:right-5 md:bottom-5 md:left-[calc(15.5rem+1.25rem)] lg:hidden">
+             class="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex gap-2 md:right-5 md:bottom-5 md:left-[calc(15.5rem+1.25rem)] lg:hidden">
+            {{-- Limpiar a la mano, sin abrir el pedido: pide confirmación antes de borrar. --}}
+            <button type="button" @click="confirmClear()" aria-label="Limpiar pedido"
+                    class="grid size-[4.25rem] shrink-0 touch-manipulation place-items-center rounded-2xl border border-line bg-surface text-chile shadow-lg motion-safe:transition motion-safe:active:scale-[0.98]">
+                <x-icon name="trash" class="size-6" />
+            </button>
             <button type="button" @click="openSheet()"
-                    class="flex w-full touch-manipulation items-center gap-3 rounded-2xl bg-chile py-3 pr-4 pl-3 text-left text-white shadow-[0_10px_30px_-8px_rgb(224_36_36/0.6)] motion-safe:transition motion-safe:active:scale-[0.98]">
+                    class="flex min-w-0 flex-1 touch-manipulation items-center gap-3 rounded-2xl bg-chile py-3 pr-4 pl-3 text-left text-white shadow-[0_10px_30px_-8px_rgb(224_36_36/0.6)] motion-safe:transition motion-safe:active:scale-[0.98]">
                 <span class="num grid size-11 place-items-center rounded-xl bg-white/18 text-2xl font-bold" x-text="count()"></span>
                 <span class="flex-1 text-base font-semibold">Ver pedido</span>
                 <span class="num text-[2rem] leading-none font-bold" x-text="fmt(total())"></span>
@@ -1081,8 +1101,8 @@ new #[Title('Vender')] class extends Component
                         <p class="text-sm text-muted">Toca uno para indicaciones</p>
                     </div>
                     @include('partials.order-lines')
-                    {{-- En el celular, Vaciar vive aquí: en el encabezado no cabe junto al título en pantallas angostas. --}}
-                    <button type="button" @click="confirmClear()" class="btn-quiet-danger -ml-2.5 mt-1 lg:hidden"><x-icon name="trash" class="size-4" /> Vaciar pedido</button>
+                    {{-- Limpiar también vive aquí por si el cuadro ya está abierto; en la barra de abajo está sin abrirlo. --}}
+                    <button type="button" @click="confirmClear()" class="btn-quiet-danger -ml-2.5 mt-1 lg:hidden"><x-icon name="trash" class="size-4" /> Limpiar pedido</button>
                 </div>
 
                 {{-- Desglose --}}
@@ -1224,7 +1244,8 @@ new #[Title('Vender')] class extends Component
                         </div>
                     </div>
 
-                    <template x-for="g in catalog[editor.product_id]?.options ?? []" :key="g.id">
+                    {{-- Al agregar un producto solo se pide lo obligatorio; los Sin, extras y notas se ponen tocando su renglón en el pedido. --}}
+                    <template x-for="g in (catalog[editor.product_id]?.options ?? []).filter(g => ! (g.required && g.choices.length === 1) && (! editor.isNew || g.required))" :key="g.id">
                         <div>
                             <p class="label"><span x-text="g.name"></span> <span class="font-normal text-muted" x-text="g.required ? '(elige uno)' : '(opcional)'"></span></p>
                             <div class="flex flex-wrap gap-2">
@@ -1239,7 +1260,7 @@ new #[Title('Vender')] class extends Component
                         </div>
                     </template>
 
-                    <div x-show="catalog[editor.product_id]?.without.length">
+                    <div x-show="! editor.isNew && catalog[editor.product_id]?.without.length">
                         <p class="label">Sin</p>
                         <div class="flex flex-wrap gap-2">
                             <template x-for="w in catalog[editor.product_id]?.without ?? []" :key="w.id">
@@ -1251,7 +1272,7 @@ new #[Title('Vender')] class extends Component
                         </div>
                     </div>
 
-                    <div x-show="catalog[editor.product_id]?.extras.length">
+                    <div x-show="! editor.isNew && catalog[editor.product_id]?.extras.length">
                         <p class="label">Extras</p>
                         <div class="flex flex-wrap gap-2">
                             <template x-for="x in catalog[editor.product_id]?.extras ?? []" :key="x.id">
@@ -1265,12 +1286,12 @@ new #[Title('Vender')] class extends Component
                         </div>
                     </div>
 
-                    <div>
+                    <div x-show="! editor.isNew">
                         <label class="label" for="line-notes">Nota</label>
                         <input id="line-notes" type="text" x-model="editor.notes" maxlength="120" class="input" placeholder="Ej. bien dorada, salsa aparte" @keydown.enter.prevent="saveEdit()">
                     </div>
 
-                    <label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
+                    <label x-show="! editor.isNew" class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
                         <span>
                             <span class="block font-semibold">Cortesía</span>
                             <span class="block text-sm text-muted">Va gratis. Su costo sí cuenta en la ganancia.</span>
@@ -1278,7 +1299,7 @@ new #[Title('Vender')] class extends Component
                         <input type="checkbox" x-model="editor.courtesy" class="switch">
                     </label>
 
-                    <p x-show="! catalog[editor.product_id]?.without.length && ! catalog[editor.product_id]?.extras.length && ! catalog[editor.product_id]?.options.length" class="flex gap-2 text-sm text-muted">
+                    <p x-show="! editor.isNew && ! catalog[editor.product_id]?.without.length && ! catalog[editor.product_id]?.extras.length && ! catalog[editor.product_id]?.options.length" class="flex gap-2 text-sm text-muted">
                         <x-icon name="info" class="mt-0.5 size-4 shrink-0" />
                         <span>Si le agregas receta y extras a este producto en Productos, aquí aparecerán botones como "Sin cebolla".</span>
                     </p>

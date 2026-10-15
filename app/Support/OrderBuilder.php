@@ -54,6 +54,10 @@ class OrderBuilder
             foreach ($product->optionGroups as $group) {
                 // Si llegan dos del mismo grupo, se respeta la primera que se eligió.
                 $choice = $picked->map(fn ($id) => $group->choices->firstWhere('id', $id))->filter()->first();
+                // Obligatorio y con una sola opción (el combo siempre lleva Coca-Cola): no hay nada que elegir, va incluida.
+                if (! $choice && $group->required && $group->choices->count() === 1) {
+                    $choice = $group->choices->first();
+                }
                 if ($choice) {
                     $choices->push(['group' => $group, 'choice' => $choice]);
                 } elseif ($group->required) {

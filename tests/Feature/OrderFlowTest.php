@@ -312,6 +312,23 @@ class OrderFlowTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
+    public function test_required_group_with_a_single_choice_is_included_without_asking(): void
+    {
+        $combo = Product::create(['name' => 'Combo con Coca', 'price' => 100]);
+        $group = $combo->optionGroups()->create(['name' => 'Refresco', 'required' => true, 'sort_order' => 0]);
+        $group->choices()->create(['name' => 'Coca-Cola', 'price' => 5, 'sort_order' => 0]);
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $combo->id, 'qty' => 2]])
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        $item = Order::with('items')->sole()->items->sole();
+        $this->assertSame('Coca-Cola', $item->choices()[0]['name']);
+        $this->assertSame('105.00', $item->unit_price);
+        $this->assertSame('210.00', Order::sole()->total);
+    }
+
     public function test_choice_is_saved_and_its_price_added(): void
     {
         [$combo, $coca, $horchata] = $this->comboWithDrinks();
