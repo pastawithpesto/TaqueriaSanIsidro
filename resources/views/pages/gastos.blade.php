@@ -282,14 +282,10 @@ new #[Title('Gastos')] class extends Component
 
             <div x-show="$wire.category === 'ingredients'" class="space-y-2">
                 <div class="grid grid-cols-[1fr_8rem] gap-3">
-                    <div>
+                    {{-- Al escoger el insumo, el cursor pasa a la cantidad. --}}
+                    <div class="min-w-0" @pick="$nextTick(() => document.getElementById('quantity')?.focus())">
                         <label class="label" for="ingredient_id">Insumo</label>
-                        <select id="ingredient_id" wire:model="ingredient_id" class="input">
-                            <option value="">Otro</option>
-                            @foreach ($this->ingredients as $i)
-                                <option value="{{ $i->id }}">{{ $i->name }}</option>
-                            @endforeach
-                        </select>
+                        <x-combobox id="ingredient_id" bind="$wire.ingredient_id" :options="$this->ingredients->map(fn ($i) => ['value' => $i->id, 'label' => $i->name, 'hint' => $i->unit])->values()->all()" none="Otro (sin insumo)" />
                     </div>
                     <div>
                         <label class="label" for="quantity">Cantidad</label>

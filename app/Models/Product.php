@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 
 #[Fillable(['name', 'category', 'price', 'active', 'sold_out_on', 'sort_order'])]
 class Product extends Model
@@ -18,6 +20,30 @@ class Product extends Model
             'active' => 'boolean',
             'sold_out_on' => 'date',
         ];
+    }
+
+    /** Categorías en uso, en orden alfabético, para escoger al dar de alta un producto. */
+    public static function categories(): Collection
+    {
+        return static::whereNotNull('category')->distinct()->orderBy('category')->pluck('category');
+    }
+
+    /**
+     * "tacos" o "Tácos" se guardan como "Tacos" si esa categoría ya existe, para no tener dos iguales en Vender.
+     * $exceptId deja fuera al producto que se edita: si es el único en su categoría, puede corregir cómo se escribe.
+     */
+    public static function normalizeCategory(?string $category, ?int $exceptId = null): ?string
+    {
+        $category = trim((string) $category);
+
+        if ($category === '') {
+            return null;
+        }
+
+        $plain = fn (string $text) => Str::lower(Str::ascii($text));
+
+        return static::whereNotNull('category')->when($exceptId, fn ($q) => $q->whereKeyNot($exceptId))->distinct()->pluck('category')
+            ->first(fn (string $existing) => $plain($existing) === $plain($category)) ?? $category;
     }
 
     public function ingredients(): BelongsToMany

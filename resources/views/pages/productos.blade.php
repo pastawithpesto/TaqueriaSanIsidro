@@ -3,7 +3,6 @@
 use App\Models\Ingredient;
 use App\Models\Product;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -30,7 +29,7 @@ new #[Title('Productos')] class extends Component
     /** @var array<int, array{id: ?int, name: string, price: string, ingredient_id: ?int, quantity: ?string}> */
     public array $extras = [];
 
-    /** Grupos para elegir (ej. Refresco): @var array<int, array{id: ?int, name: string, required: bool, choices: array}> */
+    /** Opciones a escoger (ej. Refresco: Coca, Sprite o Fanta): @var array<int, array{id: ?int, name: string, required: bool, choices: array}> */
     public array $options = [];
 
     /** En el mismo orden que Vender, para poder acomodarlos arrastrando. */
@@ -56,7 +55,7 @@ new #[Title('Productos')] class extends Component
     #[Computed]
     public function categories()
     {
-        return Product::whereNotNull('category')->distinct()->orderBy('category')->pluck('category');
+        return Product::categories();
     }
 
     public function create(): void
@@ -167,11 +166,11 @@ new #[Title('Productos')] class extends Component
             ->filter(fn ($g) => $g['name'] !== '' && $g['choices'])
             ->values()->all();
 
-        $this->category = $this->matchingCategory(trim((string) $this->category)) ?: null;
+        $this->category = Product::normalizeCategory($this->category, $this->editingId);
 
         $data = $this->validate([
             'name' => ['required', 'string', 'max:255'],
-            'category' => ['nullable', 'string', 'max:255'],
+            'category' => ['nullable', 'string', 'max:40'],
             'price' => ['required', 'numeric', 'min:0', 'max:99999'],
             'active' => ['boolean'],
             'sort_order' => ['integer', 'min:0'],
@@ -222,15 +221,6 @@ new #[Title('Productos')] class extends Component
         $this->resetForm();
         unset($this->products, $this->categories);
         $this->dispatch('toast', message: 'Producto guardado');
-    }
-
-    /** "tacos" se guarda como "Tacos" si esa categoría ya existe, para no tener dos iguales en Vender. */
-    protected function matchingCategory(string $category): string
-    {
-        $normalize = fn (string $text) => Str::lower(Str::ascii($text));
-
-        return Product::whereNotNull('category')->when($this->editingId, fn ($q) => $q->whereKeyNot($this->editingId))->distinct()->pluck('category')
-            ->first(fn (string $existing) => $normalize($existing) === $normalize($category)) ?? $category;
     }
 
     /**
@@ -431,6 +421,7 @@ new #[Title('Productos')] class extends Component
     @endif
     </div>
 
+    @php $ingredientOptions = $this->ingredients->map(fn ($i) => ['value' => $i->id, 'label' => $i->name, 'hint' => $i->unit])->values()->all(); @endphp
     <x-sheet :title="$editingId ? 'Editar producto' : 'Nuevo producto'" open="sheet" dismiss="sheet = false; $wire.cancel()">
         <div wire:loading.block wire:target="edit,duplicate,create" class="space-y-4" aria-hidden="true">
             <div class="h-12 animate-pulse rounded-xl bg-sunken"></div>
@@ -452,10 +443,7 @@ new #[Title('Productos')] class extends Component
                 </div>
                 <div>
                     <label class="label" for="category">Categoría</label>
-                    <input id="category" type="text" list="categories" wire:model="category" class="input" maxlength="255" placeholder="Tacos">
-                    <datalist id="categories">
-                        @foreach ($this->categories as $c) <option value="{{ $c }}"></option> @endforeach
-                    </datalist>
+                    <x-combobox id="category" bind="$wire.category" :options="$this->categories->all()" placeholder="Escoge una" create="Crear categoría" clear="Quitar categoría" maxlength="40" />
                     @error('category') <p class="error">{{ $message }}</p> @enderror
                 </div>
             </div>
@@ -498,14 +486,12 @@ new #[Title('Productos')] class extends Component
                 @else
                     <div class="border-t border-line pt-3">
                         <div class="flex flex-wrap items-start gap-2">
-                            <select x-model="newIng" class="input min-w-40 flex-1" aria-label="Insumo">
-                                <option value="">Agregar insumo</option>
-                                @foreach ($this->ingredients as $i)
-                                    <option value="{{ $i->id }}">{{ $i->name }} ({{ $i->unit }})</option>
-                                @endforeach
-                            </select>
+                            {{-- Al escoger el insumo, el cursor pasa a la cantidad. --}}
+                            <div class="min-w-40 flex-1" @pick="$nextTick(() => $refs.newQty?.focus())">
+                                <x-combobox bind="newIng" :options="$ingredientOptions" placeholder="Buscar insumo" aria-label="Insumo" />
+                            </div>
                             <div class="relative w-32">
-                                <input type="number" step="any" inputmode="decimal" x-model="newQty" @keydown.enter.prevent="add()" class="input pr-12" placeholder="Cantidad" aria-label="Cantidad">
+                                <input x-ref="newQty" type="number" step="any" inputmode="decimal" x-model="newQty" @keydown.enter.prevent="add()" class="input pr-12" placeholder="Cantidad" aria-label="Cantidad">
                                 <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted" x-text="ings[newIng]?.unit ?? ''"></span>
                             </div>
                             <button type="button" @click="add()" class="btn h-12">Agregar</button>
@@ -524,8 +510,8 @@ new #[Title('Productos')] class extends Component
 
             <section class="space-y-3 rounded-2xl bg-sunken/60 p-4">
                 <div>
-                    <h3 class="section-title">Para elegir</h3>
-                    <p class="text-sm text-muted">Cosas que el cliente escoge, como el refresco del combo. Al venderlo, la app pregunta antes de agregarlo.</p>
+                    <h3 class="section-title">Opciones a escoger</h3>
+                    <p class="text-sm text-muted">Solo si el cliente escoge entre varias, como Coca, Sprite o Fanta en el combo; al venderlo, la app le pregunta. Lo que siempre lleva va en la receta.</p>
                 </div>
                 <div wire:ignore class="space-y-3">
                     <template x-for="(group, gi) in $wire.options ?? []" :key="gi">
@@ -552,7 +538,7 @@ new #[Title('Productos')] class extends Component
                 @if ($errors->has('options.*'))
                     <p class="error">Revisa las opciones: cada grupo y cada opción necesitan nombre.</p>
                 @endif
-                <button type="button" @click="addGroup()" class="btn w-full"><x-icon name="plus" class="size-4" /> Agregar algo para elegir</button>
+                <button type="button" @click="addGroup()" class="btn w-full"><x-icon name="plus" class="size-4" /> Agregar opciones a escoger</button>
             </section>
 
             <section class="space-y-3 rounded-2xl bg-sunken/60 p-4">
@@ -572,12 +558,9 @@ new #[Title('Productos')] class extends Component
                                 <button type="button" @click="removeExtra(i)" class="btn-quiet size-11 justify-center !px-0" aria-label="Quitar extra"><x-icon name="x" class="size-4" /></button>
                             </div>
                             <div class="flex gap-2">
-                                <select x-model="extra.ingredient_id" class="input !min-h-10 flex-1" aria-label="Insumo que usa">
-                                    <option value="">No usa insumo</option>
-                                    @foreach ($this->ingredients as $ing)
-                                        <option value="{{ $ing->id }}">Usa {{ $ing->name }}</option>
-                                    @endforeach
-                                </select>
+                                <div class="min-w-0 flex-1">
+                                    <x-combobox bind="extra.ingredient_id" :options="$ingredientOptions" none="No usa insumo" class="!min-h-10" aria-label="Insumo que usa" />
+                                </div>
                                 <div class="relative w-28" x-show="extra.ingredient_id">
                                     <input type="number" step="any" min="0" inputmode="decimal" x-model="extra.quantity" class="input !min-h-10 pr-11" placeholder="Cant." aria-label="Cantidad de insumo">
                                     <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted" x-text="ings[extra.ingredient_id]?.unit ?? ''"></span>

@@ -393,7 +393,7 @@ const tours = {
         },
         {
             title: 'Receta, extras y opciones',
-            text: 'Al editar un producto armas su receta con tus insumos: lo que lleva una pieza, por ejemplo 0.08 kg de carne y 2 tortillas. Marca con la X lo que el cliente puede pedir sin, agrega extras con precio (queso, aguacate) y cosas para elegir, como el refresco de un combo.',
+            text: 'Al editar un producto armas su receta con tus insumos: lo que lleva una pieza, por ejemplo 0.08 kg de carne y 2 tortillas. Marca con la X lo que el cliente puede pedir sin, agrega extras con precio (queso, aguacate) y opciones a escoger cuando el cliente elige entre varias, como el refresco de un combo. Lo que siempre lleva va en la receta.',
         },
     ],
 

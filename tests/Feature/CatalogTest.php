@@ -361,4 +361,39 @@ class CatalogTest extends TestCase
 
         $this->assertSame('Tacos', $pastor->fresh()->category);
     }
+
+    public function test_ingredient_sold_as_is_becomes_a_product_with_it_in_the_recipe(): void
+    {
+        $soda = Ingredient::create(['name' => 'Refresco 600 ml', 'unit' => 'pza', 'cost_per_unit' => 16]);
+        Product::create(['name' => 'Agua', 'category' => 'Bebidas', 'price' => 20]);
+
+        Livewire::test('pages::insumos')
+            ->call('startSelling', $soda->id)
+            ->assertSet('sellName', 'Refresco 600 ml')
+            ->set('sellName', 'Refresco')
+            ->set('sellPrice', '25')
+            ->set('sellCategory', 'bebidas')
+            ->call('sell')
+            ->assertHasNoErrors();
+
+        $product = Product::with('ingredients')->firstWhere('name', 'Refresco');
+        $this->assertSame('25.00', $product->price);
+        $this->assertSame('Bebidas', $product->category);
+        $this->assertSame([$soda->id], $product->ingredients->pluck('id')->all());
+        $this->assertEquals(16, $product->unitCost());
+    }
+
+    public function test_selling_an_ingredient_needs_a_price_and_a_new_name(): void
+    {
+        $soda = Ingredient::create(['name' => 'Refresco 600 ml', 'unit' => 'pza', 'cost_per_unit' => 16]);
+        Product::create(['name' => 'Refresco', 'price' => 25]);
+
+        Livewire::test('pages::insumos')
+            ->call('startSelling', $soda->id)
+            ->set('sellName', 'Refresco')
+            ->call('sell')
+            ->assertHasErrors(['sellName' => 'Ya hay un producto con ese nombre.', 'sellPrice']);
+
+        $this->assertSame(1, Product::count());
+    }
 }
