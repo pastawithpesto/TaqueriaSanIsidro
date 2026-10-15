@@ -53,10 +53,17 @@ Primer usuario, desde la consola del contenedor `taqueria-app` en Portainer:
 php artisan app:create-user
 ```
 
-El logo subido vive en el volumen `storage` y la base en `db-data`. Respaldo de la base:
+El logo subido vive en el volumen `storage` y la base en `db-data`.
+
+El contenedor `taqueria-backup` respalda la base una vez al día en el volumen `backups` y guarda los últimos 14 días (`BACKUP_KEEP_DAYS`). Están en el mismo servidor: de vez en cuando conviene bajar uno a otro lado.
 
 ```sh
-docker exec taqueria-db pg_dump -U taqueria taqueria > respaldo-$(date +%F).sql
+# Ver los respaldos
+docker exec taqueria-backup ls -lh /backups
+# Bajar uno a esta carpeta
+docker cp taqueria-backup:/backups/taqueria-2026-10-15.dump .
+# Restaurar (borra lo que haya en la base)
+docker exec -i taqueria-db pg_restore -U taqueria -d taqueria --clean --if-exists < taqueria-2026-10-15.dump
 ```
 
 ## Comandos útiles
@@ -79,9 +86,9 @@ docker compose logs -f app
 - Productos: precio, categoría, receta (marcando lo que se puede pedir sin) y extras. Calcula costo y margen. Cada variedad (pastor, tripa) es un producto aparte. Se acomodan arrastrando, en el mismo orden que salen en Vender. Un producto con ventas no se borra, se oculta.
 - Insumos: catálogo con unidad y costo. Si un insumo en uso pasa de kg a g (o de lt a ml), recetas y compras se convierten solas.
 - Resumen: ventas, gastos, ganancia por receta y ventas menos gastos, por periodo, con comparativo y horas fuertes.
-- Corte de caja: efectivo esperado contra contado, con entradas y retiros de efectivo.
+- Corte de caja: efectivo esperado contra contado, con entradas y retiros de efectivo. Al cerrar se anota cuánto se queda de fondo; es el fondo inicial del día siguiente.
 - Lista de compras: sugerencia por insumo según lo usado los mismos días de semanas anteriores.
-- Ajustes: nombre y logo del negocio (se usan en el login, el menú y el ícono de la app instalable), y cambio de contraseña.
+- Ajustes: nombre y logo del negocio (se usan en el login, el menú y el ícono de la app instalable), hora en que termina el día de trabajo (si se cierra después de medianoche, lo de madrugada cuenta en el día que se abrió) y cambio de contraseña.
 - Explicaciones: cada pantalla tiene un recorrido guiado (driver.js) que resalta sus partes. Sale sola la primera vez (se puede omitir o apagar) y se repite con el botón Tutorial del encabezado. Los pasos y textos están en `resources/js/tours.js`.
 
 Cada venta guarda el costo de receta del momento, así el historial no cambia si luego sube la carne.
