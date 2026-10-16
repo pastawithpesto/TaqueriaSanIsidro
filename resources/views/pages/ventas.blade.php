@@ -55,6 +55,7 @@ new #[Title('Ventas')] class extends Component
         $day = $this->day();
 
         return Order::with(['items', 'payments'])
+            ->accepted()
             ->countedBetween(BusinessDay::start($day), BusinessDay::end($day))
             ->orderByRaw('COALESCE(paid_at, sold_at)')
             ->get()

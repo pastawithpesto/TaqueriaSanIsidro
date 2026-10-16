@@ -52,6 +52,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
     public function cancelled()
     {
         return Order::where('status', OrderStatus::Cancelled)
+            ->accepted()
             ->where('cancelled_at', '>=', now()->subMinutes(self::NOTICE_MINUTES))
             ->where(fn ($q) => $q->whereNull('cancel_reason')->orWhere('cancel_reason', '!=', Order::CORRECTION))
             ->whereNull('ready_at')->whereNull('delivered_at')

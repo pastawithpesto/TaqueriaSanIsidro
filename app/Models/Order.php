@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['operation_token', 'replaces_order_id', 'user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
+#[Fillable(['source', 'customer_phone', 'public_token', 'accepted_at', 'operation_token', 'replaces_order_id', 'user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
 class Order extends Model
 {
     protected static function booted(): void
@@ -37,6 +37,7 @@ class Order extends Model
             'discount' => 'decimal:2',
             'tip' => 'decimal:2',
             'sold_at' => 'datetime',
+            'accepted_at' => 'datetime',
             'pickup_at' => 'datetime',
             'ready_at' => 'datetime',
             'paid_at' => 'datetime',
@@ -73,6 +74,23 @@ class Order extends Model
                 ->orWhere(fn (Builder $q) => $q->where('status', OrderStatus::Paid)->whereNull('delivered_at')->whereRaw('COALESCE(paid_at, sold_at) >= ?', [BusinessDay::startOfToday()])
                     ->when(! $includeReadyHere, fn (Builder $q) => $q->whereRaw("(COALESCE(service, '') <> 'here' OR ready_at IS NULL)")));
         });
+    }
+
+    /** Pedidos que el taquero ya vio: los de caja y los en línea que aceptó. Los que se pidieron y se rechazaron no cuentan. */
+    public function scopeAccepted(Builder $query): void
+    {
+        $query->where(fn (Builder $q) => $q->where('source', '!=', 'online')->orWhereNotNull('accepted_at'));
+    }
+
+    /** Pedidos en línea que esperan a que el taquero los acepte o rechace. */
+    public function scopeRequested(Builder $query): void
+    {
+        $query->where('status', OrderStatus::Requested);
+    }
+
+    public function isOnline(): bool
+    {
+        return $this->source === 'online';
     }
 
     /** Hora en que el cliente lo espera (la de recogida o la del pedido) dentro de [$from, $to). */
@@ -192,6 +210,9 @@ class Order extends Model
     /** Motivo de una venta que se canceló para corregirla y cobrarla de nuevo. */
     public const CORRECTION = 'correccion';
 
+    /** Motivo de un pedido en línea que el propio cliente canceló antes de que lo aceptaran. */
+    public const CUSTOMER_CANCELLED = 'cliente';
+
     /** Cancela dejando rastro de cuándo y por qué. */
     public function cancel(?string $reason = null): void
     {
@@ -223,7 +244,13 @@ class Order extends Model
     /** Lo que muestra el contador de Pedidos: los activos de hoy en adelante, sin los sin cobrar de días anteriores. */
     public static function pendingCount(): int
     {
-        return static::pending()->dueBetween(BusinessDay::startOfToday())->count();
+        return static::pending()->dueBetween(BusinessDay::startOfToday())->count() + static::requestedCount();
+    }
+
+    /** Pedidos en línea por aceptar. */
+    public static function requestedCount(): int
+    {
+        return static::requested()->count();
     }
 
     /** Número consecutivo del día (#1, #2...) para llamar el pedido. */

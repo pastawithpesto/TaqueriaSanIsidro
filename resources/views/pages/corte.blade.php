@@ -209,6 +209,7 @@ new #[Title('Corte de caja')] class extends Component
     public function cancelled()
     {
         return Order::where('status', OrderStatus::Cancelled)
+            ->accepted()
             ->whereNotNull('paid_at')
             ->countedBetween(BusinessDay::start($this->day()), BusinessDay::end($this->day()))
             ->get()
