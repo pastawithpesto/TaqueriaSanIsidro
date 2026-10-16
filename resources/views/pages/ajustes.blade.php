@@ -206,7 +206,7 @@ new #[Title('Ajustes')] class extends Component
     <form wire:submit="savePackaging" class="card space-y-4" data-tour="ajustes-cobros">
         <div>
             <h2 class="section-title">Para llevar y a domicilio</h2>
-            <p class="text-sm text-muted">El empaque se suma una vez a cada pedido para llevar o a domicilio. El envío es el costo normal; se puede cambiar en cada pedido. Deja 0 si no cobras.</p>
+            <p class="text-sm text-muted">El empaque se cobra una vez por pedido para llevar o a domicilio. El envío es el precio de siempre y se puede cambiar en cada pedido. Deja 0 si no cobras.</p>
         </div>
         <div class="grid grid-cols-2 gap-3">
             <div>
@@ -227,7 +227,7 @@ new #[Title('Ajustes')] class extends Component
     <form wire:submit="saveDayEnd" class="card space-y-4" data-tour="ajustes-dia">
         <div>
             <h2 class="section-title">Día de trabajo</h2>
-            <p class="text-sm text-muted">Si cierras después de medianoche, elige a qué hora termina el día: lo que vendas de madrugada cuenta en el día que abriste, en Ventas, el corte y el número de pedido.</p>
+            <p class="text-sm text-muted">Si cierras después de medianoche, elige a qué hora cambia el día. Lo que vendas de madrugada cuenta en el día que abriste: en Ventas, el corte y la numeración de pedidos.</p>
         </div>
         <div>
             <label class="label" for="day_ends_at">El día termina a las</label>
