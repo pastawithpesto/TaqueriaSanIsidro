@@ -12,6 +12,9 @@ use App\Models\Product;
  */
 class OrderBuilder
 {
+    /** Lo más que cabe en order_items.unit_cost. */
+    public const MAX_UNIT_COST = 999999.9999;
+
     /**
      * @param  array<int, array{product_id: int, qty: int, without?: array<int>, extras?: array<int>, notes?: ?string}>  $lines
      * @return array{items: array<int, array<string, mixed>>, total: float, missing: array<int, string>, unavailable: array<int, string>}
@@ -66,7 +69,8 @@ class OrderBuilder
             }
 
             $unitPrice = round((float) $product->price + $extras->sum(fn ($e) => (float) $e->price) + $choices->sum(fn ($c) => (float) $c['choice']->price), 2);
-            $unitCost = round($product->unitCost($without->all()) + $extras->sum(fn ($e) => $e->cost()), 4);
+            // Con una receta mal capturada (gramos en un insumo por kg) el costo se dispara; la venta se cobra igual.
+            $unitCost = min(self::MAX_UNIT_COST, round($product->unitCost($without->all()) + $extras->sum(fn ($e) => $e->cost()), 4));
 
             // Cortesía: la pieza no se cobra; se guarda su valor para los reportes.
             $courtesy = ! empty($line['courtesy']);

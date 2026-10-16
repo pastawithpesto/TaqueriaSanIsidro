@@ -58,6 +58,47 @@ class SalesTest extends TestCase
         $this->assertSame('10.0000', $item->fresh()->unit_cost);
     }
 
+    public function test_sale_costs_ingredients_by_their_use_unit_and_follows_new_purchases(): void
+    {
+        $bread = Ingredient::create(['name' => 'Pan', 'unit' => 'paquete', 'cost_per_unit' => 48, 'use_unit' => 'pza', 'use_per_unit' => 8]);
+        $meat = Ingredient::create(['name' => 'Carne', 'unit' => 'kg', 'cost_per_unit' => 150, 'use_unit' => 'g', 'use_per_unit' => 1000]);
+        $burger = Product::create(['name' => 'Hamburguesa', 'price' => 50]);
+        $burger->ingredients()->attach($bread, ['quantity' => 1]);
+        $burger->ingredients()->attach($meat, ['quantity' => 120]);
+        $double = $burger->extras()->create(['name' => 'Doble carne', 'price' => 20, 'ingredient_id' => $meat->id, 'quantity' => 120]);
+
+        Livewire::test('pages::gastos')
+            ->set('category', 'ingredients')
+            ->set('ingredient_id', $bread->id)
+            ->set('quantity', '2')
+            ->set('total', '80')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        Livewire::test('pages::vender')
+            ->set('lines', [$this->line($burger, 1, ['extras' => [$double->id]])])
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        // Pan: $80 / 2 paquetes / 8 pza = $5. Carne: 240 g a $0.15 = $36.
+        $this->assertSame('40.0000', $bread->fresh()->cost_per_unit);
+        $this->assertSame('41.0000', Order::with('items')->sole()->items->sole()->unit_cost);
+    }
+
+    public function test_a_misentered_recipe_does_not_block_the_sale(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 220]);
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $taco->ingredients()->attach($meat, ['quantity' => 99999]);
+
+        Livewire::test('pages::vender')
+            ->set('lines', [$this->line($taco, 1)])
+            ->call('charge')
+            ->assertReturned(['ok' => true]);
+
+        $this->assertSame('999999.9999', Order::with('items')->sole()->items->sole()->unit_cost);
+    }
+
     public function test_server_uses_database_prices(): void
     {
         $taco = Product::create(['name' => 'Taco', 'price' => 20]);
