@@ -13,8 +13,8 @@ class AuthTest extends TestCase
 
     public function test_guests_are_redirected_to_login(): void
     {
-        foreach (['/', '/resumen', '/ventas', '/gastos', '/productos', '/insumos', '/corte', '/pedidos/pendientes'] as $path) {
-            $this->get($path)->assertRedirect('/login');
+        foreach (['vender', 'resumen', 'ventas', 'gastos', 'productos', 'insumos', 'corte', 'pedidos.pending'] as $name) {
+            $this->get(route($name))->assertRedirect(route('login'));
         }
     }
 
@@ -61,8 +61,8 @@ class AuthTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
 
-        foreach (['/', '/resumen', '/ventas', '/gastos', '/productos', '/insumos', '/corte'] as $path) {
-            $this->get($path)->assertOk();
+        foreach (['vender', 'resumen', 'ventas', 'gastos', 'productos', 'insumos', 'corte'] as $name) {
+            $this->get(route($name))->assertOk();
         }
     }
 
@@ -81,5 +81,15 @@ class AuthTest extends TestCase
             ->assertHasErrors(['email' => 'Demasiados intentos. Intenta de nuevo en 5 min.']);
 
         $this->assertGuest();
+    }
+
+    public function test_the_internal_system_lives_under_the_admin_path_and_the_root_is_for_customers(): void
+    {
+        $this->assertSame('/'.config('app.admin_path'), route('vender', [], false));
+        $this->assertSame('/', route('pedir', [], false));
+
+        $this->get('/')->assertOk();
+        $this->get(route('vender'))->assertRedirect(route('login'));
+        $this->get('/ventas')->assertNotFound();
     }
 }

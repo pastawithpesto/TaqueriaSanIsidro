@@ -34,6 +34,7 @@ services:
       APP_LOCALE: es
       APP_FALLBACK_LOCALE: es
       APP_TIMEZONE: ${APP_TIMEZONE:-America/Matamoros}
+      ADMIN_PATH: ${ADMIN_PATH:-admon}
       LOG_CHANNEL: stderr
       LOG_LEVEL: ${LOG_LEVEL:-warning}
       DB_CONNECTION: pgsql

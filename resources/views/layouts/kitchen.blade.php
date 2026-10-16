@@ -13,7 +13,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-dvh antialiased" style="background: #191411; color: #f7efe5; color-scheme: dark" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}">
+<body class="min-h-dvh antialiased" style="background: #191411; color: #f7efe5; color-scheme: dark" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-tour-url="{{ route('tutorial.done') }}">
     <div id="busy" aria-hidden="true"></div>
     {{ $slot }}
 

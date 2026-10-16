@@ -27,7 +27,7 @@ class BrandingTest extends TestCase
 
     public function test_settings_page_requires_login(): void
     {
-        $this->get('/ajustes')->assertRedirect('/login');
+        $this->get(route('ajustes'))->assertRedirect(route('login'));
     }
 
     public function test_defaults_are_used_when_nothing_is_configured(): void
@@ -44,7 +44,7 @@ class BrandingTest extends TestCase
         Setting::put('business_name', 'Tacos El Güero');
         Setting::put('business_short_name', 'El Güero');
 
-        $this->get('/manifest.webmanifest')
+        $this->get(route('manifest'))
             ->assertOk()
             ->assertJsonPath('name', 'Tacos El Güero')
             ->assertJsonPath('short_name', 'El Güero')
@@ -76,7 +76,7 @@ class BrandingTest extends TestCase
             ->call('saveBusiness')
             ->assertRedirect(route('ajustes'));
 
-        $this->withSession(['toast' => 'Nombre guardado'])->get('/ajustes')->assertSee('Nombre guardado');
+        $this->withSession(['toast' => 'Nombre guardado'])->get(route('ajustes'))->assertSee('Nombre guardado');
     }
 
     public function test_name_is_required(): void

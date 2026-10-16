@@ -17,7 +17,8 @@ docker compose up -d --build
 
 La primera vez crea `.env`, instala dependencias, genera la llave y corre las migraciones.
 
-- App: http://localhost:8090
+- Clientes: http://localhost:8090
+- Sistema del taquero: http://localhost:8090/admon
 - Vite (HMR): puerto 5174
 - PostgreSQL: puerto 5433, solo desde este equipo (usuario `taqueria`, password `secret`, base `taqueria`)
 
@@ -65,6 +66,10 @@ docker cp taqueria-backup:/backups/taqueria-2026-10-15.dump .
 # Restaurar (borra lo que haya en la base)
 docker exec -i taqueria-db pg_restore -U taqueria -d taqueria --clean --if-exists < taqueria-2026-10-15.dump
 ```
+
+## Rutas
+
+La raíz del dominio es para los clientes (`/`). El sistema del taquero (vender, pedidos, cocina, gastos, ajustes) vive bajo `ADMIN_PATH`, por defecto `/admon`: `https://taqueria.revmnds.com/admon`. Se cambia con la variable `ADMIN_PATH` (minúsculas, números y guiones). Si se cambia, hay que volver a instalar la app en el celular, porque su dirección de inicio es esa ruta.
 
 ## Comandos útiles
 

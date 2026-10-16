@@ -40,7 +40,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-dvh antialiased" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-pending="{{ $pendingCount }}">
+<body class="min-h-dvh antialiased" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-pending="{{ $pendingCount }}" data-pending-url="{{ route('pedidos.pending') }}" data-tour-url="{{ route('tutorial.done') }}">
     <div id="busy" aria-hidden="true"></div>
 
     <div class="md:grid md:min-h-dvh md:grid-cols-[15.5rem_1fr]">

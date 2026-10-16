@@ -69,6 +69,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Ruta del sistema interno
+    |--------------------------------------------------------------------------
+    |
+    | La raíz del dominio es para los clientes. El sistema del taquero (vender,
+    | pedidos, cocina, gastos...) vive bajo esta ruta: dominio.com/admon.
+    | Se cambia con ADMIN_PATH. Solo letras minúsculas, números y guiones.
+    |
+    */
+
+    'admin_path' => (function () {
+        $path = strtolower(trim((string) env('ADMIN_PATH', 'admon'), '/'));
+        $reserved = ['livewire', 'up', 'brand', 'pedido', 'pedir', 'build', 'storage', 'api'];
+
+        return preg_match('/^[a-z0-9-]+$/', $path) && ! in_array($path, $reserved, true) ? $path : 'admon';
+    })(),
+
+    /*
+    |--------------------------------------------------------------------------
     | Trusted Proxies
     |--------------------------------------------------------------------------
     |

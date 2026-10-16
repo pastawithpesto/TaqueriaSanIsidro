@@ -480,7 +480,7 @@ async function prepare(open) {
 function markSeen(key) {
     if (key === 'todas') Object.keys(tours).forEach((k) => seenNow.add(k));
     seenNow.add(key);
-    fetch('/tutorial/visto', {
+    fetch(document.body.dataset.tourUrl, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

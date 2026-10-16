@@ -94,8 +94,8 @@ document.addEventListener('livewire:navigated', () => {
 window.addEventListener('pending-count', (event) => window.Alpine.store('pending', event.detail.count));
 
 const refreshPending = () => {
-    if (document.visibilityState !== 'visible' || document.body.dataset.pending === undefined) return;
-    fetch('/pedidos/pendientes', { headers: { Accept: 'application/json' } })
+    if (document.visibilityState !== 'visible' || document.body.dataset.pending === undefined || ! document.body.dataset.pendingUrl) return;
+    fetch(document.body.dataset.pendingUrl, { headers: { Accept: 'application/json' } })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => data && window.Alpine.store('pending', data.count))
         .catch(() => {});

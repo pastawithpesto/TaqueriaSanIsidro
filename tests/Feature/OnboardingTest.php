@@ -16,7 +16,7 @@ class OnboardingTest extends TestCase
     {
         $this->actingAs(User::factory()->create(['seen_tours' => ['vender']]));
 
-        $this->get('/ventas')
+        $this->get(route('ventas'))
             ->assertOk()
             ->assertSee('data-tour-start="ventas"', false)
             ->assertSee('data-tours-seen="[&quot;vender&quot;]"', false);
@@ -26,15 +26,15 @@ class OnboardingTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
 
-        $this->get('/cocina')->assertOk()->assertSee('data-tour-start="cocina"', false);
+        $this->get(route('cocina'))->assertOk()->assertSee('data-tour-start="cocina"', false);
     }
 
     public function test_seen_tour_is_saved_once(): void
     {
         $user = User::factory()->create(['seen_tours' => ['vender']]);
 
-        $this->actingAs($user)->postJson('/tutorial/visto', ['tour' => 'gastos'])->assertNoContent();
-        $this->actingAs($user)->postJson('/tutorial/visto', ['tour' => 'gastos'])->assertNoContent();
+        $this->actingAs($user)->postJson(route('tutorial.done'), ['tour' => 'gastos'])->assertNoContent();
+        $this->actingAs($user)->postJson(route('tutorial.done'), ['tour' => 'gastos'])->assertNoContent();
 
         $this->assertSame(['vender', 'gastos'], $user->fresh()->seen_tours);
     }
@@ -43,7 +43,7 @@ class OnboardingTest extends TestCase
     {
         $user = User::factory()->create(['seen_tours' => ['vender']]);
 
-        $this->actingAs($user)->postJson('/tutorial/visto', ['tour' => 'todas'])->assertNoContent();
+        $this->actingAs($user)->postJson(route('tutorial.done'), ['tour' => 'todas'])->assertNoContent();
 
         $this->assertSame(Tours::KEYS, $user->fresh()->seen_tours);
     }
@@ -52,14 +52,14 @@ class OnboardingTest extends TestCase
     {
         $user = User::factory()->create();
 
-        $this->actingAs($user)->postJson('/tutorial/visto', ['tour' => 'otra'])->assertUnprocessable();
+        $this->actingAs($user)->postJson(route('tutorial.done'), ['tour' => 'otra'])->assertUnprocessable();
 
         $this->assertNull($user->fresh()->seen_tours);
     }
 
     public function test_guests_cannot_mark_a_tour(): void
     {
-        $this->post('/tutorial/visto', ['tour' => 'vender'])->assertRedirect('/login');
+        $this->post(route('tutorial.done'), ['tour' => 'vender'])->assertRedirect(route('login'));
     }
 
     public function test_settings_can_show_every_tour_again(): void

@@ -26,8 +26,8 @@ class BrandingController extends Controller
             'short_name' => Branding::shortName(),
             'description' => 'Ventas, gastos y ganancias del negocio.',
             'lang' => 'es-MX',
-            'start_url' => '/',
-            'scope' => '/',
+            'start_url' => route('vender', [], false).'/',
+            'scope' => route('vender', [], false).'/',
             'display' => 'standalone',
             // Sin orientación fija: la tablet de cocina se usa también en horizontal.
             'background_color' => '#f8f5ef',
