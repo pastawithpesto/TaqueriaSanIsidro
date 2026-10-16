@@ -393,7 +393,7 @@ const tours = {
         },
         {
             title: 'Receta, extras y opciones',
-            text: 'Al editar un producto armas su receta con tus insumos: lo que lleva una pieza, por ejemplo 0.08 kg de carne y 2 tortillas. Marca con la X lo que el cliente puede pedir sin, agrega extras con precio (queso, aguacate) y opciones a escoger cuando el cliente elige entre varias, como el refresco de un combo. Lo que siempre lleva va en la receta.',
+            text: 'Al editar un producto armas su receta con tus insumos: lo que lleva una pieza, por ejemplo 0.08 kg de carne (u 80 g si en Insumos la usas por gramo) y 2 tortillas. Toca "Se puede quitar" en lo que el cliente puede pedir sin, agrega extras con precio (queso, aguacate) y opciones a escoger cuando el cliente elige entre varias, como el refresco de un combo. Lo que siempre lleva va en la receta.',
         },
     ],
 
@@ -405,7 +405,7 @@ const tours = {
         {
             el: 'nuevo-insumo',
             title: 'Agregar un insumo',
-            text: 'Ponle nombre, la unidad en que lo compras y un costo aproximado. El costo se corrige solo después.',
+            text: 'Ponle nombre, la unidad en que lo compras y un costo aproximado. El costo se corrige solo después. Si no lo usas como lo compras (el pan se compra por paquete y se usa por pieza), dilo en "En las recetas" con cuántas trae.',
         },
         {
             el: 'insumo',

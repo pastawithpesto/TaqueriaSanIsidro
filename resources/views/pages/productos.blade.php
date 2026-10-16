@@ -3,6 +3,7 @@
 use App\Models\Ingredient;
 use App\Models\Product;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -169,7 +170,7 @@ new #[Title('Productos')] class extends Component
         $this->category = Product::normalizeCategory($this->category, $this->editingId);
 
         $data = $this->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'name' => ['required', 'string', 'max:255', Rule::unique('products', 'name')->ignore($this->editingId)],
             'category' => ['nullable', 'string', 'max:40'],
             'price' => ['required', 'numeric', 'min:0', 'max:99999'],
             'active' => ['boolean'],
@@ -183,6 +184,8 @@ new #[Title('Productos')] class extends Component
             'options.*.name' => ['required', 'string', 'max:40'],
             'options.*.choices.*.name' => ['required', 'string', 'max:40'],
             'options.*.choices.*.price' => ['required', 'numeric', 'min:0', 'max:99999'],
+        ], [
+            'name.unique' => 'Ya hay un producto con ese nombre.',
         ]);
 
         $product = DB::transaction(function () use ($data) {
@@ -328,12 +331,17 @@ new #[Title('Productos')] class extends Component
         removeGroup(gi) { const g = [...$wire.options]; g.splice(gi, 1); $wire.options = g },
         addChoice(gi) { const g = $wire.options.map(x => ({ ...x, choices: [...x.choices] })); g[gi].choices.push({ id: null, name: '', price: '' }); $wire.options = g },
         removeChoice(gi, ci) { const g = $wire.options.map(x => ({ ...x, choices: [...x.choices] })); g[gi].choices.splice(ci, 1); $wire.options = g },
+        // Un solo ingrediente que cuesta más que el producto casi siempre es una cantidad mal escrita (gramos en kg).
+        tooMuch(row) {
+            const price = Number($wire.price) || 0;
+            return price > 0 && (Number(row.quantity) || 0) * (this.ings[row.ingredient_id]?.cost ?? 0) > price;
+        },
         // Un solo cálculo que lee receta y precio directamente, para que siempre se actualice.
         stats() {
             const cost = ($wire.recipe ?? []).reduce((t, r) => t + (Number(r.quantity) || 0) * (this.ings[r.ingredient_id]?.cost ?? 0), 0);
             const price = Number($wire.price) || 0;
             const profit = price - cost;
-            return { cost, price, profit, margin: price > 0 ? Math.round(profit / price * 100) : null };
+            return { cost, price, profit, margin: price > 0 ? Math.max(-999, Math.round(profit / price * 100)) : null };
         },
      }">
     <x-page-header title="Productos" tour="productos">
@@ -388,7 +396,7 @@ new #[Title('Productos')] class extends Component
                                             'bg-salsa-soft text-salsa' => $margin >= 50,
                                             'bg-limon-soft text-ink' => $margin >= 25 && $margin < 50,
                                             'bg-chile-soft text-chile' => $margin < 25,
-                                        ])>{{ round($margin) }}%</span>
+                                        ])>{{ max(-999, round($margin)) }}%</span>
                                     @else
                                         <span class="badge bg-limon-soft text-ink">Sin receta</span>
                                     @endif
@@ -464,7 +472,7 @@ new #[Title('Productos')] class extends Component
                     <div class="space-y-2 rounded-xl bg-surface p-3" x-data="{ get ing() { return ings[row.ingredient_id] ?? { name: 'Insumo borrado', unit: '', cost: 0 } } }">
                         <div class="flex items-start gap-2">
                             <span class="min-w-0 flex-1 pt-1.5 text-[15px] font-semibold break-words" x-text="ing.name + (ing.active === false ? ' (inactivo)' : '')"></span>
-                            <span class="num shrink-0 pt-1.5 text-sm text-muted" x-text="fmt((Number(row.quantity) || 0) * ing.cost)"></span>
+                            <span class="num shrink-0 pt-1.5 text-sm" :class="tooMuch(row) ? 'font-bold text-chile' : 'text-muted'" x-text="fmt((Number(row.quantity) || 0) * ing.cost)"></span>
                             <button type="button" @click="remove(index)" class="btn-quiet -mr-1 size-9 shrink-0 justify-center !px-0" :aria-label="'Quitar ' + ing.name"><x-icon name="trash" class="size-4" /></button>
                         </div>
                         <div class="flex flex-wrap items-center gap-2">
@@ -477,6 +485,10 @@ new #[Title('Productos')] class extends Component
                     </div>
                 </template>
                 <p x-show="! ($wire.recipe ?? []).length" class="text-sm text-muted">Aún no hay insumos en la receta.</p>
+                <p x-show="($wire.recipe ?? []).some(r => tooMuch(r))" x-cloak role="alert" class="flex gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile">
+                    <x-icon name="alert" class="mt-0.5 size-4 shrink-0" />
+                    <span>Un ingrediente cuesta más que todo el producto. Revisa la cantidad: si se compra por kg, 100 gramos son 0.1 (o en Insumos ponlo a usar por g).</span>
+                </p>
                 <p x-show="($wire.recipe ?? []).length" class="hint">Marca "Se puede quitar" en lo que el cliente puede pedir sin, como cebolla o cilantro. Al vender aparecerá "Sin cebolla".</p>
                 </div>
                 @if ($errors->has('recipe.*'))

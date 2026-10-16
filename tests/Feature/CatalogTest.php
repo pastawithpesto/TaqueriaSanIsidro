@@ -305,6 +305,21 @@ class CatalogTest extends TestCase
         $this->assertSame('kg', $meat->fresh()->unit);
     }
 
+    public function test_an_unused_ingredient_changes_to_any_unit_without_asking(): void
+    {
+        $mayo = Ingredient::create(['name' => 'Mayonesa', 'unit' => 'kg', 'cost_per_unit' => 70]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $mayo->id)
+            ->set('unit', 'bote')
+            ->call('save')
+            ->assertHasNoErrors()
+            ->assertSet('equivalenceFrom', null);
+
+        $this->assertSame('bote', $mayo->fresh()->unit);
+        $this->assertSame('70.0000', $mayo->fresh()->cost_per_unit);
+    }
+
     public function test_renaming_the_purchase_unit_keeps_recipes_and_cost(): void
     {
         $cilantro = Ingredient::create(['name' => 'Cilantro', 'unit' => 'paquete', 'cost_per_unit' => 10]);
@@ -512,6 +527,34 @@ class CatalogTest extends TestCase
             ->call('save');
 
         $this->assertSame('Tacos', $pastor->fresh()->category);
+    }
+
+    public function test_two_ingredients_cannot_share_a_name(): void
+    {
+        Ingredient::create(['name' => 'Cebolla', 'unit' => 'kg', 'cost_per_unit' => 35]);
+
+        Livewire::test('pages::insumos')
+            ->call('create')
+            ->set('name', 'Cebolla ')
+            ->set('cost_per_unit', '30')
+            ->call('save')
+            ->assertHasErrors(['name' => 'Ya hay un insumo con ese nombre.']);
+
+        $this->assertSame(1, Ingredient::count());
+    }
+
+    public function test_two_products_cannot_share_a_name(): void
+    {
+        Product::create(['name' => 'Taco de bistec', 'price' => 20]);
+
+        Livewire::test('pages::productos')
+            ->call('create')
+            ->set('name', 'Taco de bistec')
+            ->set('price', '22')
+            ->call('save')
+            ->assertHasErrors(['name' => 'Ya hay un producto con ese nombre.']);
+
+        $this->assertSame(1, Product::count());
     }
 
     public function test_ingredient_sold_as_is_becomes_a_product_with_it_in_the_recipe(): void

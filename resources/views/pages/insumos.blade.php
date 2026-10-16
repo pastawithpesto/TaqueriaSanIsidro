@@ -218,13 +218,16 @@ new #[Title('Insumos')] class extends Component
         $known = $this->use_unit ? Ingredient::factorBetween($this->unit, $this->use_unit) : null;
         $this->use_per_unit = $this->use_unit ? ($known !== null ? (string) $known : $this->use_per_unit) : null;
 
+        $this->name = trim($this->name);
+
         $data = $this->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'name' => ['required', 'string', 'max:255', Rule::unique('ingredients', 'name')->ignore($this->editingId)],
             'unit' => ['required', Rule::in(Ingredient::UNITS)],
             'cost_per_unit' => ['required', 'numeric', 'min:0', 'max:999999'],
             'use_unit' => ['nullable', 'string', 'max:20', 'regex:/^[\pL ]+$/u'],
-            'use_per_unit' => ['nullable', 'required_with:use_unit', 'numeric', 'gt:0', 'max:999999'],
+            'use_per_unit' => ['nullable', 'required_with:use_unit', 'numeric', 'min:0.0001', 'max:999999'],
         ], [
+            'name.unique' => 'Ya hay un insumo con ese nombre.',
             'use_unit.regex' => 'Escribe solo la unidad, como untada o taza.',
             'use_per_unit.required_with' => 'Escribe cuántas rinde.',
         ], ['use_unit' => 'unidad', 'use_per_unit' => 'cantidad']);
@@ -262,7 +265,7 @@ new #[Title('Insumos')] class extends Component
         }
 
         // Si no se tocó el costo, también se convierte: $6 por pza son $48 por paquete de 8.
-        if ($changes($purchaseFactor) && abs((float) $data['cost_per_unit'] - (float) $ingredient->cost_per_unit) < 0.00005) {
+        if ($purchaseFactor !== null && $changes($purchaseFactor) && abs((float) $data['cost_per_unit'] - (float) $ingredient->cost_per_unit) < 0.00005) {
             $data['cost_per_unit'] = round((float) $ingredient->cost_per_unit / $purchaseFactor, 4);
         }
 
