@@ -422,6 +422,15 @@ class CatalogTest extends TestCase
         $this->assertEqualsWithDelta(5.4, $taco->extras()->sole()->cost(), 0.0001);
     }
 
+    public function test_cost_by_the_gram_is_shown_per_100_g_only_when_the_unit_weighs_that_much(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 180, 'use_unit' => 'g', 'use_per_unit' => 1000]);
+        $saffron = Ingredient::create(['name' => 'Azafrán', 'unit' => 'paquete', 'cost_per_unit' => 25, 'use_unit' => 'g', 'use_per_unit' => 5]);
+
+        $this->assertSame('$18 por 100 g', $meat->useCostLabel());
+        $this->assertSame('$5 por g', $saffron->useCostLabel());
+    }
+
     public function test_a_typed_use_unit_is_saved_as_the_one_already_listed(): void
     {
         $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 180]);

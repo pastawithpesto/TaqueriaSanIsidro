@@ -107,14 +107,14 @@ class Ingredient extends Model
         return (float) $this->cost_per_unit / $this->usesPerUnit();
     }
 
-    /** "$5.63 por pza" o "$18 por 100 g"; null si se usa como se compra. */
+    /** "$5.63 por pza" o "$18 por 100 g" (por g si lo comprado pesa menos de 100); null si se usa como se compra. */
     public function useCostLabel(): ?string
     {
         if (! $this->use_unit) {
             return null;
         }
 
-        return in_array($this->use_unit, ['g', 'ml'], true)
+        return in_array($this->use_unit, ['g', 'ml'], true) && $this->usesPerUnit() >= 100
             ? money($this->costPerUse() * 100).' por 100 '.$this->use_unit
             : money($this->costPerUse()).' por '.$this->use_unit;
     }

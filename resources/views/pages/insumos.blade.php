@@ -475,7 +475,8 @@ new #[Title('Insumos')] class extends Component
                                 const cost = Number($wire.cost_per_unit);
                                 if (this.same || ! (this.per > 0) || ! (cost > 0)) return '';
                                 const each = cost / this.per;
-                                return ['g', 'ml'].includes(this.use)
+                                // En gramos se lee mejor por cada 100, salvo que lo comprado pese menos que eso.
+                                return ['g', 'ml'].includes(this.use) && this.per >= 100
                                     ? '100 ' + this.use + ' te cuestan ' + this.money(each * 100) + '.'
                                     : 'Cada ' + this.use + ' te cuesta ' + this.money(each) + '.';
                             },
