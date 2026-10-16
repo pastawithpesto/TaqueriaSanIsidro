@@ -59,6 +59,29 @@ window.addEventListener(
 document.addEventListener('livewire:navigating', () => (overlays.length = 0));
 
 /*
+ * Lo que se ve tiene que ser lo del servidor:
+ * - Con el botón atrás, Livewire pone la copia de la pantalla que guardó al salir (Pedidos con un pedido que ya
+ *   se cobró, Ventas sin la última venta): se vuelve a cargar.
+ * - Si el teléfono estuvo bloqueado o en otra app un rato, la pantalla se actualiza al regresar.
+ */
+let shownPath = location.pathname;
+document.addEventListener('livewire:navigated', () => (shownPath = location.pathname));
+document.addEventListener('livewire:navigate', (event) => {
+    const { history, cached, url } = event.detail ?? {};
+    if (history && cached && url?.pathname !== shownPath) {
+        event.preventDefault();
+        location.reload();
+    }
+});
+
+let hiddenAt = null;
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') return (hiddenAt = Date.now());
+    if (hiddenAt && Date.now() - hiddenAt > 120000) window.Livewire?.all().forEach((component) => component.$wire.$refresh());
+    hiddenAt = null;
+});
+
+/*
  * Contador de Pedidos del menú. Lo pinta el servidor al cargar la página; cambia al momento con
  * lo que se hace aquí (evento pending-count) y cada minuto se consulta por lo vendido en otro equipo.
  */
