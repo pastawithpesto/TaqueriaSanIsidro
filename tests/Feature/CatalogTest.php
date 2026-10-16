@@ -290,7 +290,7 @@ class CatalogTest extends TestCase
         $this->assertSame(10.0, $taco->fresh()->unitCost());
     }
 
-    public function test_unit_of_an_ingredient_in_use_cannot_change_to_an_unrelated_unit(): void
+    public function test_changing_to_an_unrelated_unit_asks_the_equivalence_before_saving(): void
     {
         $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 200]);
         Product::create(['name' => 'Taco', 'price' => 20])->ingredients()->attach($meat, ['quantity' => 0.05]);
@@ -299,9 +299,49 @@ class CatalogTest extends TestCase
             ->call('edit', $meat->id)
             ->set('unit', 'pza')
             ->call('save')
-            ->assertHasErrors(['unit' => 'Ya se usa por kg. Déjalo así y abajo di cómo lo usas, o crea otro insumo.']);
+            ->assertSet('equivalenceFrom', 'kg')
+            ->assertSee('Ya hay recetas o compras por kg');
 
         $this->assertSame('kg', $meat->fresh()->unit);
+    }
+
+    public function test_renaming_the_purchase_unit_keeps_recipes_and_cost(): void
+    {
+        $cilantro = Ingredient::create(['name' => 'Cilantro', 'unit' => 'paquete', 'cost_per_unit' => 10]);
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $taco->ingredients()->attach($cilantro, ['quantity' => 0.03]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $cilantro->id)
+            ->set('unit', 'manojo')
+            ->call('save')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $cilantro->refresh();
+        $this->assertSame('manojo', $cilantro->unit);
+        $this->assertSame('10.0000', $cilantro->cost_per_unit);
+        $this->assertSame('0.0300', $taco->ingredients()->sole()->pivot->quantity);
+    }
+
+    public function test_the_equivalence_converts_recipes_purchases_and_cost(): void
+    {
+        $bread = Ingredient::create(['name' => 'Pan', 'unit' => 'pza', 'cost_per_unit' => 6]);
+        $burger = Product::create(['name' => 'Hamburguesa', 'price' => 50]);
+        $burger->ingredients()->attach($bread, ['quantity' => 1]);
+        $purchase = Expense::create(['category' => 'ingredients', 'ingredient_id' => $bread->id, 'quantity' => 16, 'total' => 96, 'spent_on' => today()]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $bread->id)
+            ->set('unit', 'paquete')
+            ->call('save')
+            ->set('equivalence', '8')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('48.0000', $bread->fresh()->cost_per_unit);
+        $this->assertSame('0.1250', $burger->ingredients()->sole()->pivot->quantity);
+        $this->assertSame('2.0000', $purchase->fresh()->quantity);
     }
 
     public function test_using_an_ingredient_by_portion_turns_recipe_fractions_into_portions(): void

@@ -31,6 +31,11 @@ new #[Title('Insumos')] class extends Component
     /** Cuántas de esas trae lo que se compra: 8 pza por paquete. */
     public ?string $use_per_unit = null;
 
+    /** Si cambia cómo se compra y la app no sabe la equivalencia, la pregunta: 1 pza son ¿cuántos paquetes? */
+    public ?string $equivalenceFrom = null;
+
+    public ?string $equivalence = '1';
+
     /** El insumo que se edita ya está en recetas, extras o compras. */
     public bool $inUse = false;
 
@@ -197,7 +202,7 @@ new #[Title('Insumos')] class extends Component
 
     protected function resetForm(): void
     {
-        $this->reset('showForm', 'editingId', 'name', 'use_unit', 'use_per_unit', 'inUse');
+        $this->reset('showForm', 'editingId', 'name', 'use_unit', 'use_per_unit', 'equivalenceFrom', 'equivalence', 'inUse');
         $this->unit = 'kg';
         $this->cost_per_unit = '0';
         $this->resetErrorBag();
@@ -237,6 +242,10 @@ new #[Title('Insumos')] class extends Component
         $old = ['unit' => $ingredient->unit, 'use' => $ingredient->recipeUnit(), 'per' => $ingredient->usesPerUnit()];
         $new = ['unit' => $data['unit'], 'use' => $data['use_unit'] ?? $data['unit'], 'per' => $data['use_unit'] ? (float) $data['use_per_unit'] : 1.0];
         $purchaseFactor = $this->purchaseFactor($old, $new);
+        if ($purchaseFactor === null && $this->equivalenceFrom === $old['unit']) {
+            $this->validate(['equivalence' => ['required', 'numeric', 'gt:0', 'max:999999']], [], ['equivalence' => 'equivalencia']);
+            $purchaseFactor = 1 / (float) $this->equivalence;
+        }
         $recipeFactor = Ingredient::factorBetween($old['use'], $new['use'])
             ?? ($purchaseFactor !== null ? $purchaseFactor * $new['per'] / $old['per'] : null);
 
@@ -244,8 +253,10 @@ new #[Title('Insumos')] class extends Component
         $convertRecipes = $changes($recipeFactor) && $this->isInRecipes($ingredient);
         $convertPurchases = $changes($purchaseFactor) && $ingredient->expenses()->whereNotNull('quantity')->exists();
 
+        // Sin forma de saberla, se pregunta antes de guardar. Si solo se le cambia el nombre (paquete por manojo), es 1.
         if (($convertRecipes && $recipeFactor === null) || ($convertPurchases && $purchaseFactor === null)) {
-            $this->addError('unit', "Ya se usa por {$old['unit']}. Déjalo así y abajo di cómo lo usas, o crea otro insumo.");
+            $this->equivalenceFrom = $old['unit'];
+            $this->equivalence = '1';
 
             return;
         }
@@ -427,6 +438,18 @@ new #[Title('Insumos')] class extends Component
                         @error('cost_per_unit') <p class="error">{{ $message }}</p> @enderror
                     </div>
                 </div>
+                @if ($equivalenceFrom)
+                    <div x-show="$wire.unit !== @js($equivalenceFrom)" class="space-y-2 rounded-xl bg-limon-soft px-4 py-3">
+                        <p class="text-sm">Ya hay recetas o compras por {{ $equivalenceFrom }}. Para pasarlas, di a cuánto equivale:</p>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[15px] font-semibold" x-text="'1 ' + $wire.unit + ' son'"></span>
+                            <input type="number" inputmode="decimal" step="any" min="0" wire:model="equivalence" class="input !min-h-11 w-24" aria-label="Equivalencia">
+                            <span class="text-[15px] font-semibold" x-text="unitLabel(@js($equivalenceFrom), Number($wire.equivalence) || 1)"></span>
+                        </div>
+                        @error('equivalence') <p class="error">{{ $message }}</p> @enderror
+                        <p class="hint">Si solo le cambias el nombre, deja 1.</p>
+                    </div>
+                @endif
                 <p class="hint">Si no sabes el costo exacto, pon uno aproximado. Se corrige solo cuando registres la compra.</p>
 
                 {{-- Lo que no se usa como se compra: la receta dice "1 pza" de pan aunque se compre por paquete. --}}
