@@ -708,10 +708,12 @@ new #[Title('Vender')] class extends Component
             this.saveDraft();
             this.$nextTick(() => bump(document.getElementById('q-' + pid)));
         },
-        setQty(i, value) {
-            const qty = Math.min(999, Math.max(0, Math.floor(Number(value) || 0)));
+        setQty(i, input) {
             const lines = this.list().map(l => ({ ...l }));
             if (! lines[i]) return;
+            // Borrar el número para escribir otro no debe quitar el renglón: si queda vacío, vuelve la cantidad que tenía.
+            if (input.value.trim() === '' || isNaN(Number(input.value))) return input.value = lines[i].qty;
+            const qty = Math.min(999, Math.max(0, Math.floor(Number(input.value))));
             qty === 0 ? lines.splice(i, 1) : lines[i].qty = qty;
             $wire.lines = lines;
             if (! lines.length) this.emptied();

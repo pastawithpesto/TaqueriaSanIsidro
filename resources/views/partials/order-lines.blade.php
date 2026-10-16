@@ -2,9 +2,9 @@
 <ul class="divide-y divide-line">
     <template x-for="(line, i) in list()" :key="i + '-' + line.product_id + '-' + line.qty + '-' + (line.choices ?? []).join('.') + '-' + (line.without ?? []).join('.') + '-' + (line.extras ?? []).join('.') + '-' + (line.notes ?? '')">
         <li class="flex items-start gap-2">
-            {{-- La cantidad se escribe directo: 15 tacos no deberían ser 15 toques. En 0 se quita el renglón. --}}
+            {{-- La cantidad se escribe directo: 15 tacos no deberían ser 15 toques. Un 0 quita el renglón; vacío regresa a la anterior. --}}
             <input type="number" inputmode="numeric" min="0" max="999" :value="line.qty"
-                   @change="setQty(i, $event.target.value)" @focus="$event.target.select()" @keydown.enter.prevent="$event.target.blur()"
+                   @change="setQty(i, $event.target)" @focus="$event.target.select()" @keydown.enter.prevent="$event.target.blur()"
                    class="num mt-1.5 h-10 w-12 shrink-0 rounded-lg border border-line bg-surface text-center text-xl leading-none focus:border-ink focus:outline-none"
                    :aria-label="'Cantidad de ' + (catalog[line.product_id]?.name ?? 'producto')">
             <button type="button" @click="edit(i)" class="flex min-w-0 flex-1 items-start gap-3 py-2.5 text-left">
