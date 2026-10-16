@@ -50,6 +50,7 @@ new #[Layout('layouts::public')] #[Title('Haz tu pedido')] class extends Compone
             'reason' => $can['reason'],
             'delivery' => Store::deliveryEnabled(),
             'deliveryOffMessage' => Store::deliveryOffMessage(),
+            'phone' => Store::phone(),
             'packagingFee' => (float) Setting::value('packaging_fee', '0'),
             'deliveryFee' => (float) Setting::value('delivery_fee', '0'),
         ];
@@ -105,6 +106,12 @@ new #[Layout('layouts::public')] #[Title('Haz tu pedido')] class extends Compone
             </div>
         </div>
         <p class="mt-3 text-sm">{{ $store['schedule'] }}</p>
+        @if ($store['phone'])
+            <div class="mt-3 flex flex-wrap gap-2">
+                <a href="tel:{{ $store['phone'] }}" class="btn !min-h-9 !px-3"><x-icon name="phone" class="size-4" /> Llamar</a>
+                <a href="https://wa.me/52{{ $store['phone'] }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="chat" class="size-4" /> WhatsApp</a>
+            </div>
+        @endif
     </header>
 
     @if ($store['message'])

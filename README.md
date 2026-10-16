@@ -81,6 +81,14 @@ Si Reverb está caído, la app sigue funcionando y los pedidos se guardan; las p
 
 La raíz del dominio es para los clientes (`/`). El sistema del taquero (vender, pedidos, cocina, gastos, ajustes) vive bajo `ADMIN_PATH`, por defecto `/admon`: `https://taqueria.revmnds.com/admon`. Se cambia con la variable `ADMIN_PATH` (minúsculas, números y guiones). Si se cambia, hay que volver a instalar la app en el celular, porque su dirección de inicio es esa ruta.
 
+## Pedidos en línea
+
+La raíz del dominio es el menú público: el cliente arma su pedido, escribe nombre y teléfono, elige recoger o domicilio (si está disponible) y lo manda. Cada pedido llega **Por aceptar** a Pedidos (suena y avisa al instante); el taquero lo acepta (entra a Pedidos y Cocina como cualquier pedido por cobrar) o lo rechaza con un motivo. El cliente sigue su pedido en un enlace secreto (`/pedido/{token}`) que se actualiza solo.
+
+En el sistema, **Tienda en línea** controla: el estado (según horario, abierta o cerrada a mano, con un mensaje para avisos como mal clima), si se reciben pedidos en línea (independiente de estar abierto), si hay domicilio (si no, a domicilio queda bloqueado con un mensaje), el horario por día (por defecto jueves a domingo, 8 pm a 12 am) y las credenciales de Mercado Pago. Los pedidos solo se aceptan con la tienda abierta y los pedidos en línea activados.
+
+Contra pedidos falsos: nombre y teléfono obligatorios, límite de pedidos por equipo y por teléfono, campo trampa para programas y aceptación manual de cada pedido. La integración de cobro con Mercado Pago queda pendiente: las credenciales ya se guardan (cifradas), pero todavía no cobra.
+
 ## Comandos útiles
 
 ```sh

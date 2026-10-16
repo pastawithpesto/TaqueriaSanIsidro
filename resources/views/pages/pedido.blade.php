@@ -172,6 +172,10 @@ new #[Layout('layouts::public')] #[Title('Tu pedido')] class extends Component
             <button type="button" class="btn w-full" @click="if (await $store.confirm.ask({ title: '¿Cancelar tu pedido?', message: 'Todavía no lo han aceptado, así que no pasa nada.', action: 'Cancelar pedido', cancel: 'No' })) $wire.cancel()">Cancelar mi pedido</button>
         @endif
 
+        @if ($phone = \App\Support\Store::phone())
+            <p class="text-center text-[15px]">¿Dudas? <a href="tel:{{ $phone }}" class="font-semibold underline">Llámanos al {{ substr($phone, 0, 3).' '.substr($phone, 3, 3).' '.substr($phone, 6) }}</a></p>
+        @endif
+
         <p class="text-center text-sm text-muted">Guarda este enlace para volver a ver cómo va tu pedido.</p>
         <a href="{{ route('pedir') }}" class="btn w-full">Hacer otro pedido</a>
     </main>

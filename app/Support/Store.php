@@ -136,6 +136,14 @@ class Store
         ];
     }
 
+    /** Teléfono de la taquería que ven los clientes (10 dígitos). */
+    public static function phone(): ?string
+    {
+        $digits = preg_replace('/\D+/', '', (string) Setting::value('store_phone'));
+
+        return strlen($digits) === 10 ? $digits : null;
+    }
+
     public static function onlineEnabled(): bool
     {
         return Setting::value('online_enabled', '0') === '1';

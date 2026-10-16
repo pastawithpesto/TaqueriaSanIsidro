@@ -153,4 +153,30 @@ class StoreSettingsTest extends TestCase
         $this->assertNull($mp['public_key']);
         $this->assertFalse($mp['enabled']);
     }
+
+    public function test_the_public_phone_is_normalized_and_shown_to_customers(): void
+    {
+        Livewire::test('pages::tienda')->set('phone', '+52 (868) 123-4567')->call('savePhone')->assertHasNoErrors()->assertSet('phone', '8681234567');
+        $this->assertSame('8681234567', Store::phone());
+
+        $this->get('/')->assertSee('tel:8681234567', false)->assertSee('https://wa.me/528681234567', false);
+
+        Livewire::test('pages::tienda')->set('phone', '12345')->call('savePhone')->assertHasErrors('phone');
+        $this->assertSame('8681234567', Store::phone());
+
+        Livewire::test('pages::tienda')->set('phone', '')->call('savePhone');
+        $this->assertNull(Store::phone());
+    }
+
+    public function test_the_orders_screen_summarizes_the_store_with_a_shortcut(): void
+    {
+        $this->get(route('pedidos'))->assertSee('Pedidos en línea apagados')->assertSee(route('tienda'));
+
+        Setting::put('online_enabled', '1');
+        Setting::put('store_mode', 'open');
+        $this->get(route('pedidos'))->assertSee('Abierta')->assertSee('Pedidos en línea activados')->assertSee('solo recoger');
+
+        Setting::put('online_delivery', '1');
+        $this->get(route('pedidos'))->assertSee('con domicilio');
+    }
 }

@@ -4,6 +4,7 @@ use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
 use App\Support\OnlineOrder;
+use App\Support\Store;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -11,6 +12,13 @@ use Livewire\Component;
 
 new #[Title('Pedidos')] class extends Component
 {
+    /** Cómo está la tienda para los clientes, con un acceso directo para cambiarlo. */
+    #[Computed]
+    public function store(): array
+    {
+        return ['open' => Store::isOpen(), 'online' => Store::onlineEnabled(), 'delivery' => Store::deliveryEnabled()];
+    }
+
     /** Pedidos que hicieron los clientes en línea y esperan una respuesta: el que lleva más tiempo, primero. */
     #[Computed]
     public function requested()
@@ -144,6 +152,15 @@ new #[Title('Pedidos')] class extends Component
     </x-page-header>
 
     <div class="space-y-6">
+        <a href="{{ route('tienda') }}" wire:navigate class="flex items-center gap-2.5 rounded-2xl border border-line bg-surface px-4 py-3 text-sm" data-tour="pedidos-tienda">
+            <x-icon name="store" class="size-5 shrink-0 text-muted" />
+            <span class="min-w-0 flex-1">
+                <span class="font-semibold">{{ $this->store['open'] ? 'Abierta' : 'Cerrada' }}</span>
+                <span class="text-muted">· Pedidos en línea {{ $this->store['online'] ? 'activados' : 'apagados' }}{{ $this->store['online'] ? ' · '.($this->store['delivery'] ? 'con domicilio' : 'solo recoger') : '' }}</span>
+            </span>
+            <span class="font-semibold underline">Cambiar</span>
+        </a>
+
         @if ($this->requested->isNotEmpty())
             <section class="space-y-3" aria-label="Pedidos en línea por aceptar" data-tour="pedidos-en-linea">
                 <h2 class="section-title flex items-center gap-2 px-1">

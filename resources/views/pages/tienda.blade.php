@@ -13,6 +13,8 @@ new #[Title('Tienda en línea')] class extends Component
 
     public string $notice = '';
 
+    public string $phone = '';
+
     public bool $online = false;
 
     public bool $delivery = false;
@@ -38,6 +40,7 @@ new #[Title('Tienda en línea')] class extends Component
     {
         $this->mode = Store::mode();
         $this->notice = (string) Store::message();
+        $this->phone = (string) Store::phone();
         $this->online = Store::onlineEnabled();
         $this->delivery = Store::deliveryEnabled();
         $this->deliveryMessage = (string) Setting::value('online_delivery_message');
@@ -93,6 +96,18 @@ new #[Title('Tienda en línea')] class extends Component
         Setting::put('store_message', $this->notice);
         unset($this->status);
         $this->dispatch('toast', message: $this->notice === '' ? 'Se quitó el mensaje.' : 'Mensaje guardado.');
+    }
+
+    public function savePhone(): void
+    {
+        $digits = preg_replace('/\D+/', '', $this->phone);
+        $digits = strlen($digits) === 12 && str_starts_with($digits, '52') ? substr($digits, 2) : $digits;
+
+        $this->phone = $digits;
+        $this->validate(['phone' => ['nullable', 'regex:/^$|^\d{10}$/']], ['phone.regex' => 'Escribe el teléfono a 10 dígitos.'], ['phone' => 'teléfono']);
+
+        Setting::put('store_phone', $digits);
+        $this->dispatch('toast', message: $digits === '' ? 'Se quitó el teléfono.' : 'Teléfono guardado.');
     }
 
     public function toggleOnline(): void
@@ -230,6 +245,21 @@ new #[Title('Tienda en línea')] class extends Component
             </form>
         </section>
 
+        {{-- La página de los clientes --}}
+        <section class="card space-y-3">
+            <div>
+                <h2 class="section-title">Tu página para clientes</h2>
+                <p class="text-sm text-muted">Comparte este enlace en tus redes y en tu puesto.</p>
+            </div>
+            <div class="flex items-center gap-2" x-data="{ copied: false }">
+                <input type="text" readonly value="{{ url('/') }}" class="input flex-1" aria-label="Enlace de la página para clientes" @focus="$el.select()">
+                <button type="button" class="btn" @click="navigator.clipboard?.writeText(@js(url('/'))).then(() => { copied = true; setTimeout(() => copied = false, 2000) })">
+                    <x-icon name="copy" class="size-4" /> <span x-text="copied ? 'Copiado' : 'Copiar'">Copiar</span>
+                </button>
+            </div>
+            <a href="{{ route('pedir') }}" target="_blank" rel="noopener" class="btn w-full">Ver como cliente</a>
+        </section>
+
         {{-- Pedidos en línea --}}
         <section class="card space-y-4" data-tour="tienda-pedidos">
             <div>
@@ -259,6 +289,14 @@ new #[Title('Tienda en línea')] class extends Component
                 @error('deliveryMessage') <p class="error">{{ $message }}</p> @enderror
                 <p class="hint">Si lo dejas vacío, se usa el mensaje de arriba.</p>
                 <button type="submit" class="btn">Guardar mensaje</button>
+            </form>
+
+            <form wire:submit="savePhone" class="space-y-2">
+                <label class="label" for="store-phone">Teléfono de la taquería (opcional)</label>
+                <input id="store-phone" type="tel" inputmode="tel" wire:model="phone" maxlength="20" class="input" placeholder="10 dígitos">
+                @error('phone') <p class="error">{{ $message }}</p> @enderror
+                <p class="hint">Los clientes lo ven en la página para llamar o escribirte por WhatsApp.</p>
+                <button type="submit" class="btn">Guardar teléfono</button>
             </form>
 
             <p class="hint">Todos los pedidos en línea llegan como "Por aceptar": tú decides si los aceptas o los rechazas. El empaque y el envío que cobras salen de Ajustes.</p>
