@@ -361,7 +361,7 @@ new #[Title('Insumos')] class extends Component
     <div class="space-y-4">
     @if (! $this->hasAny)
         <x-empty icon="package" title="Empieza por tus insumos">
-            Son lo que compras para cocinar: carne, tortillas, cebolla, cilantro. Con su costo la app calcula cuánto ganas por cada taco.
+            Son lo que compras para cocinar: carne, tortillas, cebolla, cilantro. Con su costo la app calcula cuánto ganas en cada producto.
             <x-slot:action><button type="button" @click="sheet = true" class="btn-primary">Agregar el primer insumo</button></x-slot:action>
         </x-empty>
     @elseif ($this->ingredients->isEmpty())
@@ -498,7 +498,7 @@ new #[Title('Insumos')] class extends Component
                         <p x-show="known !== null" x-cloak class="self-end pb-3 text-[15px]" x-text="'1 ' + $wire.unit + ' son ' + known + ' ' + use + '.'"></p>
                     </div>
                     <p class="font-semibold" x-show="costText" x-cloak x-text="costText"></p>
-                    <p class="hint" x-show="! same && known === null" x-cloak x-text="'Aquí va lo de 1 ' + $wire.unit + ', no lo de un taco: eso se pone en la receta. Si no lo sabes exacto, calcula; lo corriges cuando veas cuánto te dura.'"></p>
+                    <p class="hint" x-show="! same && known === null" x-cloak x-text="'Aquí va lo de 1 ' + $wire.unit + ', no lo que lleva cada producto: eso se pone en su receta. Si no lo sabes exacto, calcula; lo corriges cuando veas cuánto te dura.'"></p>
                 </section>
                 @if ($inUse)
                     <p class="hint">Ya se usa en recetas o compras. Si cambias cómo se compra o se usa, las cantidades se convierten solas.</p>
