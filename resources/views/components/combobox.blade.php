@@ -5,7 +5,8 @@
 
     bind     expresión de Alpine que guarda el valor ($wire.category, newIng, extra.ingredient_id).
     options  textos o ['value' => 7, 'label' => 'Cebolla', 'hint' => 'kg'].
-    create   texto para crear una opción nueva con lo escrito ("Crear categoría"); sin él no se crean.
+    create   texto para crear una opción nueva con lo escrito ("Crear categoría"); sin él no se crean. Lo creado
+             solo se ve en la lista mientras está escogido: si no se guarda, no se queda.
     none     opción para dejarlo vacío ("No usa insumo"); sin ella se vacía con la x.
 --}}
 @php
@@ -32,9 +33,10 @@
         get items() {
             const q = this.plain(this.query);
             const typed = this.query.trim();
-            const items = this.options.filter(o => ! q || this.plain(o.label).includes(q)).map(o => ({ ...o, create: false }));
+            const created = this.create && ! this.empty(this.value) && ! this.selected ? [{ value: this.value, label: String(this.value), hint: null }] : [];
+            const items = [...this.options, ...created].filter(o => ! q || this.plain(o.label).includes(q)).map(o => ({ ...o, create: false }));
             if (this.none !== null && ! q) items.unshift({ value: '', label: this.none, hint: null, create: false });
-            if (this.create && typed && ! this.options.some(o => this.plain(o.label) === q)) {
+            if (this.create && typed && ! items.some(o => this.plain(o.label) === q)) {
                 items.push({ value: typed, label: this.create + ' «' + typed + '»', hint: null, create: true });
             }
             return items;
@@ -63,7 +65,6 @@
         },
         close() { this.open = false; this.query = '' },
         choose(item) {
-            if (item.create && ! this.options.some(o => o.value === item.value)) this.options.push({ value: item.value, label: item.value, hint: null });
             this.value = item.value;
             this.close();
             this.$dispatch('pick', item.value);
@@ -74,7 +75,7 @@
             if (n) this.active = (this.active + step + n) % n;
         },
      }"
-     x-modelable="value" x-model="{{ $bind }}"
+     x-modelable="value" x-model="{{ $bind }}" wire:key="combobox-{{ md5($bind.json_encode($items)) }}"
      @click.outside="close()"
      class="relative">
     <input x-ref="input" type="text" role="combobox" autocomplete="off" aria-autocomplete="list"

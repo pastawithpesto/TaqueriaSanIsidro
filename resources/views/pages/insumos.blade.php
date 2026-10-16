@@ -206,7 +206,7 @@ new #[Title('Insumos')] class extends Component
     public function save(): void
     {
         // Usarlo como se compra es no tener unidad de uso; de kg a g la equivalencia no se pregunta.
-        $this->use_unit = Str::lower(trim((string) $this->use_unit)) ?: null;
+        $this->use_unit = Ingredient::normalizeUnit($this->use_unit, [...Ingredient::UNITS, ...$this->useUnits]);
         if ($this->use_unit === $this->unit) {
             $this->use_unit = null;
         }

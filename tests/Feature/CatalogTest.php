@@ -367,6 +367,28 @@ class CatalogTest extends TestCase
         $this->assertEqualsWithDelta(5.4, $taco->extras()->sole()->cost(), 0.0001);
     }
 
+    public function test_a_typed_use_unit_is_saved_as_the_one_already_listed(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 180]);
+        $mayo = Ingredient::create(['name' => 'Mayonesa', 'unit' => 'bote', 'cost_per_unit' => 70]);
+
+        Livewire::test('pages::insumos')->call('edit', $meat->id)->set('use_unit', 'Gramos')->call('save')->assertHasNoErrors();
+        Livewire::test('pages::insumos')->call('edit', $mayo->id)->set('use_unit', 'cucharadas')->set('use_per_unit', '60')->call('save')->assertHasNoErrors();
+
+        $this->assertSame('g', $meat->fresh()->use_unit);
+        $this->assertSame('1000.0000', $meat->fresh()->use_per_unit);
+        $this->assertSame('cucharada', $mayo->fresh()->use_unit);
+    }
+
+    public function test_a_new_use_unit_is_saved_in_singular(): void
+    {
+        $butter = Ingredient::create(['name' => 'Mantequilla', 'unit' => 'bote', 'cost_per_unit' => 60]);
+
+        Livewire::test('pages::insumos')->call('edit', $butter->id)->set('use_unit', 'Untadas')->set('use_per_unit', '50')->call('save')->assertHasNoErrors();
+
+        $this->assertSame('untada', $butter->fresh()->use_unit);
+    }
+
     public function test_a_custom_use_unit_must_be_a_word(): void
     {
         $butter = Ingredient::create(['name' => 'Mantequilla', 'unit' => 'bote', 'cost_per_unit' => 60]);

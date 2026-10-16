@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 #[Fillable(['name', 'unit', 'cost_per_unit', 'use_unit', 'use_per_unit', 'active'])]
 class Ingredient extends Model
@@ -18,6 +19,9 @@ class Ingredient extends Model
 
     /** Equivalencias que no hay que preguntar: cantidad en la otra unidad = cantidad × factor. */
     public const CONVERSIONS = ['kg' => ['g' => 1000], 'g' => ['kg' => 0.001], 'lt' => ['ml' => 1000], 'ml' => ['lt' => 0.001]];
+
+    /** Lo que se escribe completo y se guarda abreviado. */
+    protected const ALIASES = ['gramo' => 'g', 'kilo' => 'kg', 'kilogramo' => 'kg', 'litro' => 'lt', 'mililitro' => 'ml', 'pieza' => 'pza'];
 
     /** Abreviaturas, que no cambian en plural. */
     protected const ABBREVIATIONS = ['kg', 'g', 'lt', 'ml', 'pza'];
@@ -49,6 +53,39 @@ class Ingredient extends Model
             str_ends_with($unit, 'z') => mb_substr($unit, 0, -1).'ces',
             (bool) preg_match('/[aeiouáéó]$/u', $unit) => $unit.'s',
             default => $unit.'es',
+        };
+    }
+
+    /**
+     * Una unidad escrita a mano se guarda como la que ya existe, para no tener "untada" y "untadas" en la lista:
+     * sin importar mayúsculas, acentos ni plural, y "gramos" como g.
+     *
+     * @param  iterable<string>  $known
+     */
+    public static function normalizeUnit(?string $unit, iterable $known): ?string
+    {
+        $plain = fn (string $text) => Str::lower(Str::ascii(trim($text)));
+        $typed = $plain((string) $unit);
+
+        if ($typed === '') {
+            return null;
+        }
+
+        $candidates = collect(self::ALIASES)->merge(collect($known)->mapWithKeys(fn (string $u) => [$u => $u]));
+
+        foreach ($candidates as $name => $standard) {
+            if (in_array($typed, [$plain($name), $plain(self::unitLabel($name, 2))], true)) {
+                return $standard;
+            }
+        }
+
+        // Una nueva se guarda en singular ("untadas" como untada); el plural se arma al mostrarla.
+        $unit = Str::lower(trim((string) $unit));
+
+        return match (true) {
+            str_ends_with($unit, 'iones') => mb_substr($unit, 0, -5).'ión',
+            (bool) preg_match('/[aeo]s$/u', $unit) => mb_substr($unit, 0, -1),
+            default => $unit,
         };
     }
 
