@@ -216,11 +216,11 @@
     /* Menú contextual */
     /* Se posiciona con x-anchor (fixed) junto a su botón: así no lo recorta una lista con overflow-hidden. */
     .menu {
-        @apply z-[60] w-52 rounded-xl border border-line bg-surface p-1 shadow-xl;
+        @apply z-[60] w-max max-w-[calc(100vw-2rem)] min-w-52 rounded-xl border border-line bg-surface p-1 shadow-xl;
     }
     .menu > button,
     .menu > a {
-        @apply flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-[15px] font-semibold hover:bg-sunken;
+        @apply flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-[15px] font-semibold hover:bg-sunken;
     }
 
     /* Interruptor */
