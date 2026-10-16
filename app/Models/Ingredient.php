@@ -20,6 +20,14 @@ class Ingredient extends Model
     /** Equivalencias que no hay que preguntar: cantidad en la otra unidad = cantidad × factor. */
     public const CONVERSIONS = ['kg' => ['g' => 1000], 'g' => ['kg' => 0.001], 'lt' => ['ml' => 1000], 'ml' => ['lt' => 0.001]];
 
+    /** Unidades chicas: en "1 paquete son 8 pza" la grande va primero. */
+    protected const SMALL_UNITS = ['g', 'ml', 'pza'];
+
+    /** Lo más chico y lo más grande que cabe en las columnas decimal(12,4) de cantidades y costos. */
+    public const MIN_QUANTITY = 0.0001;
+
+    public const MAX_QUANTITY = 99999999.9999;
+
     /** Lo que se escribe completo y se guarda abreviado. */
     protected const ALIASES = ['gramo' => 'g', 'kilo' => 'kg', 'kilogramo' => 'kg', 'litro' => 'lt', 'mililitro' => 'ml', 'pieza' => 'pza'];
 
@@ -39,6 +47,25 @@ class Ingredient extends Model
     public static function factorBetween(string $from, string $to): ?float
     {
         return $from === $to ? 1.0 : (self::CONVERSIONS[$from][$to] ?? null);
+    }
+
+    /** Al cambiar de $old a $new, se le pregunta a la persona por la unidad grande: "1 paquete son 8 pza". */
+    public static function oldIsBigger(string $old, string $new): bool
+    {
+        return ! in_array($old, self::SMALL_UNITS, true) && in_array($new, self::SMALL_UNITS, true);
+    }
+
+    /** Cuántas $new es una $old, a partir de cuántas unidades chicas trae una grande. */
+    public static function equivalenceFactor(string $old, string $new, float $count): float
+    {
+        return self::oldIsBigger($old, $new) ? $count : 1 / $count;
+    }
+
+    /** Si multiplicar cantidades entre $min y $max por $factor las deja entre lo más chico y lo más grande que se guarda. */
+    public static function fitsAfterScaling(?float $min, ?float $max, float $factor): bool
+    {
+        return $min === null || $max === null
+            || ($min * $factor >= self::MIN_QUANTITY - 0.00005 && $max * $factor <= self::MAX_QUANTITY);
     }
 
     /** "porciones" para 4 y "porción" para 1. Las abreviaturas no cambian: 4 pza, 100 g. */
@@ -151,8 +178,10 @@ class Ingredient extends Model
     {
         $latest = $this->expenses()->where('quantity', '>', 0)->orderByDesc('spent_on')->orderByDesc('id')->first();
 
-        if ($latest) {
-            $this->update(['cost_per_unit' => round((float) $latest->total / (float) $latest->quantity, 4)]);
+        $cost = $latest ? round((float) $latest->total / (float) $latest->quantity, 4) : null;
+
+        if ($cost !== null && $cost <= self::MAX_QUANTITY) {
+            $this->update(['cost_per_unit' => $cost]);
         }
     }
 }

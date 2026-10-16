@@ -2,8 +2,8 @@
 
 use App\Models\Ingredient;
 use App\Models\Product;
+use App\Support\Names;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -106,7 +106,7 @@ new #[Title('Productos')] class extends Component
         $source = Product::with(['ingredients', 'extras', 'optionGroups.choices'])->findOrFail($id);
 
         $copy = $source->replicate();
-        $copy->name = $source->name.' (copia)';
+        $copy->name = Names::copyOf('products', $source->name);
         $copy->sort_order = (int) Product::max('sort_order') + 1;
         $copy->save();
         $copy->ingredients()->sync($source->ingredients->mapWithKeys(
@@ -134,34 +134,44 @@ new #[Title('Productos')] class extends Component
         $this->resetErrorBag();
     }
 
+    /** Lo que llega de la receta, extras u opciones puede venir manipulado: solo texto o números, nunca listas. */
+    protected function text(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
+    }
+
     public function save(): void
     {
+        $this->name = Names::clean($this->name);
+        $this->sort_order = max(0, min(1000000, $this->sort_order));
+
         $this->recipe = collect($this->recipe)
-            ->filter(fn ($r) => ! empty($r['ingredient_id']))
-            ->map(fn ($r) => ['ingredient_id' => (int) $r['ingredient_id'], 'quantity' => (string) $r['quantity'], 'removable' => (bool) ($r['removable'] ?? false)])
+            ->filter(fn ($r) => is_array($r) && ! empty($r['ingredient_id']))
+            ->map(fn ($r) => ['ingredient_id' => (int) $this->text($r['ingredient_id']), 'quantity' => $this->text($r['quantity'] ?? ''), 'removable' => (bool) ($r['removable'] ?? false)])
             ->values()->all();
 
         // Extras: se ignoran los renglones sin nombre.
         $this->extras = collect($this->extras)
-            ->filter(fn ($e) => trim((string) ($e['name'] ?? '')) !== '')
+            ->filter(fn ($e) => is_array($e) && Names::clean($this->text($e['name'] ?? '')) !== '')
             ->map(fn ($e) => [
-                'id' => $e['id'] ?? null,
-                'name' => trim($e['name']),
-                'price' => (string) ($e['price'] ?? '0'),
-                'ingredient_id' => ($e['ingredient_id'] ?? null) ?: null,
-                'quantity' => ($e['ingredient_id'] ?? null) ? (string) ($e['quantity'] ?? '') : null,
+                'id' => is_numeric($e['id'] ?? null) ? (int) $e['id'] : null,
+                'name' => Names::clean($this->text($e['name'])),
+                'price' => $this->text($e['price'] ?? '0'),
+                'ingredient_id' => is_scalar($e['ingredient_id'] ?? null) && $e['ingredient_id'] ? (int) $e['ingredient_id'] : null,
+                'quantity' => is_scalar($e['ingredient_id'] ?? null) && $e['ingredient_id'] ? $this->text($e['quantity'] ?? '') : null,
             ])
             ->values()->all();
 
         // Grupos de opciones: sin nombre o sin opciones se descartan.
         $this->options = collect($this->options)
+            ->filter(fn ($g) => is_array($g))
             ->map(fn ($g) => [
-                'id' => $g['id'] ?? null,
-                'name' => trim((string) ($g['name'] ?? '')),
+                'id' => is_numeric($g['id'] ?? null) ? (int) $g['id'] : null,
+                'name' => Names::clean($this->text($g['name'] ?? '')),
                 'required' => (bool) ($g['required'] ?? true),
-                'choices' => collect($g['choices'] ?? [])
-                    ->filter(fn ($c) => trim((string) ($c['name'] ?? '')) !== '')
-                    ->map(fn ($c) => ['id' => $c['id'] ?? null, 'name' => trim($c['name']), 'price' => (string) (($c['price'] ?? '') === '' ? '0' : $c['price'])])
+                'choices' => collect(is_array($g['choices'] ?? null) ? $g['choices'] : [])
+                    ->filter(fn ($c) => is_array($c) && Names::clean($this->text($c['name'] ?? '')) !== '')
+                    ->map(fn ($c) => ['id' => is_numeric($c['id'] ?? null) ? (int) $c['id'] : null, 'name' => Names::clean($this->text($c['name'])), 'price' => $this->text(($c['price'] ?? '') === '' ? '0' : $c['price'])])
                     ->values()->all(),
             ])
             ->filter(fn ($g) => $g['name'] !== '' && $g['choices'])
@@ -170,26 +180,26 @@ new #[Title('Productos')] class extends Component
         $this->category = Product::normalizeCategory($this->category, $this->editingId);
 
         $data = $this->validate([
-            'name' => ['required', 'string', 'max:255', Rule::unique('products', 'name')->ignore($this->editingId)],
+            'name' => ['required', 'string', 'max:255', fn ($attribute, $value, $fail) => Names::taken('products', (string) $value, $this->editingId) ? $fail('Ya hay un producto con ese nombre.') : null],
             'category' => ['nullable', 'string', 'max:40'],
             'price' => ['required', 'numeric', 'min:0', 'max:99999'],
             'active' => ['boolean'],
-            'sort_order' => ['integer', 'min:0'],
+            'sort_order' => ['integer', 'min:0', 'max:1000000'],
             'recipe.*.ingredient_id' => ['required', 'exists:ingredients,id'],
-            'recipe.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999'],
+            'recipe.*.quantity' => ['required', 'numeric', 'min:0.0001', 'max:99999'],
             'extras.*.name' => ['required', 'string', 'max:60'],
             'extras.*.price' => ['required', 'numeric', 'min:0', 'max:99999'],
             'extras.*.ingredient_id' => ['nullable', 'exists:ingredients,id'],
-            'extras.*.quantity' => ['nullable', 'required_with:extras.*.ingredient_id', 'numeric', 'gt:0', 'max:99999'],
+            'extras.*.quantity' => ['nullable', 'required_with:extras.*.ingredient_id', 'numeric', 'min:0.0001', 'max:99999'],
             'options.*.name' => ['required', 'string', 'max:40'],
             'options.*.choices.*.name' => ['required', 'string', 'max:40'],
             'options.*.choices.*.price' => ['required', 'numeric', 'min:0', 'max:99999'],
-        ], [
-            'name.unique' => 'Ya hay un producto con ese nombre.',
         ]);
 
         $product = DB::transaction(function () use ($data) {
-            $product = Product::updateOrCreate(['id' => $this->editingId], collect($data)->except(['recipe', 'extras', 'options'])->all());
+            $fields = collect($data)->except(['recipe', 'extras', 'options'])->all();
+            // Si se borró en otro dispositivo mientras se editaba, no se vuelve a crear solo.
+            $product = $this->editingId ? tap(Product::findOrFail($this->editingId))->update($fields) : Product::create($fields);
 
             $product->ingredients()->sync(
                 collect($this->recipe)->mapWithKeys(fn ($r) => [$r['ingredient_id'] => ['quantity' => $r['quantity'], 'removable' => $r['removable']]])->all()
@@ -487,12 +497,12 @@ new #[Title('Productos')] class extends Component
                 <p x-show="! ($wire.recipe ?? []).length" class="text-sm text-muted">Aún no hay insumos en la receta.</p>
                 <p x-show="($wire.recipe ?? []).some(r => tooMuch(r))" x-cloak role="alert" class="flex gap-2 rounded-xl bg-chile-soft px-3 py-2.5 text-sm font-semibold text-chile">
                     <x-icon name="alert" class="mt-0.5 size-4 shrink-0" />
-                    <span>Un ingrediente cuesta más que todo el producto. Revisa la cantidad: si se compra por kg, 100 gramos son 0.1 (o en Insumos ponlo a usar por g).</span>
+                    <span>Este ingrediente cuesta más que el producto. Revisa la cantidad: si se compra por kg, 100 g se escriben 0.1. También puedes poner el insumo a usarse por gramo.</span>
                 </p>
-                <p x-show="($wire.recipe ?? []).length" class="hint">Marca "Se puede quitar" en lo que el cliente puede pedir sin, como cebolla o cilantro. Al vender aparecerá "Sin cebolla".</p>
+                <p x-show="($wire.recipe ?? []).length" class="hint">Marca "Se puede quitar" en lo que el cliente puede pedir sin, como la cebolla o el cilantro. Al vender saldrá "Sin cebolla".</p>
                 </div>
                 @if ($errors->has('recipe.*'))
-                    <p class="error">Revisa las cantidades de la receta: todas deben ser mayores a cero.</p>
+                    <p class="error">Alguna cantidad de la receta está vacía o es muy pequeña. Usa al menos 0.0001.</p>
                 @endif
 
                 @if ($this->ingredients->isEmpty())
@@ -511,7 +521,7 @@ new #[Title('Productos')] class extends Component
                             <button type="button" @click="add()" class="btn h-12">Agregar</button>
                         </div>
                         <p class="error" x-ref="addError" x-show="addError" x-text="addError" x-cloak></p>
-                        <p class="hint" x-show="newIng && ings[newIng]?.unit === 'kg'" x-cloak>En kilos: 0.05 kg son 50 gramos. Si prefieres gramos, cámbialo en Insumos.</p>
+                        <p class="hint" x-show="newIng && ings[newIng]?.unit === 'kg'" x-cloak>Va en kilos: 0.05 kg son 50 g. Si prefieres gramos, cámbialo en el insumo.</p>
                         <p class="hint" x-show="newIng && ings[newIng]?.whole && Number(newQty) > 0 && Number(newQty) < 1" x-cloak
                            x-text="'¿Usas solo una parte? En Insumos di cuántas porciones rinde cada ' + ings[newIng]?.unit + ' y aquí pon 1.'"></p>
                     </div>
@@ -552,7 +562,7 @@ new #[Title('Productos')] class extends Component
                     </template>
                 </div>
                 @if ($errors->has('options.*'))
-                    <p class="error">Revisa las opciones: cada grupo y cada opción necesitan nombre.</p>
+                    <p class="error">Cada grupo y cada opción necesitan un nombre.</p>
                 @endif
                 <button type="button" @click="addGroup()" class="btn w-full"><x-icon name="plus" class="size-4" /> Agregar opciones a escoger</button>
             </section>
@@ -586,7 +596,7 @@ new #[Title('Productos')] class extends Component
                     </template>
                 </div>
                 @if ($errors->has('extras.*'))
-                    <p class="error">Revisa los extras: cada uno necesita nombre y precio, y cantidad si usa un insumo.</p>
+                    <p class="error">Cada extra necesita nombre y precio. Si descuenta un insumo, también la cantidad.</p>
                 @endif
                 <button type="button" @click="addExtra()" class="btn w-full"><x-icon name="plus" class="size-4" /> Agregar extra</button>
             </section>

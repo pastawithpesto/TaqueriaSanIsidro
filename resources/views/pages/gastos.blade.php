@@ -5,6 +5,7 @@ use App\Models\Expense;
 use App\Models\Ingredient;
 use App\Support\BusinessDay;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -130,16 +131,29 @@ new #[Title('Gastos')] class extends Component
             'ingredient_id' => ['nullable', 'exists:ingredients,id'],
             'description' => ['nullable', 'string', 'max:255'],
             'supplier' => ['nullable', 'string', 'max:255'],
-            'quantity' => [$this->ingredient_id ? 'required' : 'nullable', 'numeric', 'gt:0', 'max:999999'],
+            'quantity' => [$this->ingredient_id ? 'required' : 'nullable', 'numeric', 'min:0.0001', 'max:999999'],
             'total' => ['required', 'numeric', 'gt:0', 'max:9999999'],
             'from_cash' => ['boolean'],
         ], attributes: ['total' => 'total pagado', 'spent_on' => 'fecha', 'ingredient_id' => 'insumo']);
 
-        $previousIngredient = $this->editingId ? Expense::whereKey($this->editingId)->value('ingredient_id') : null;
-        $expense = Expense::updateOrCreate(['id' => $this->editingId], $data + ['user_id' => auth()->id()]);
+        // El costo por unidad se guarda con 4 decimales: una cantidad muy chica o muy grande lo dejaría en cero o no cabría.
+        if ($this->ingredient_id) {
+            $unitCost = (float) $data['total'] / (float) $data['quantity'];
 
-        // El costo del insumo sigue a su compra más reciente; si el gasto cambió de insumo, también se recalcula el anterior.
-        Ingredient::whereIn('id', array_filter([$previousIngredient, $expense->ingredient_id]))->get()->each->syncCostFromPurchases();
+            if ($unitCost < Ingredient::MIN_QUANTITY || $unitCost > Ingredient::MAX_QUANTITY) {
+                $this->addError('quantity', 'Con esa cantidad y ese total, el precio por unidad sale fuera de lo normal. Revisa los dos.');
+
+                return;
+            }
+        }
+
+        DB::transaction(function () use ($data) {
+            $previousIngredient = $this->editingId ? Expense::whereKey($this->editingId)->value('ingredient_id') : null;
+            $expense = Expense::updateOrCreate(['id' => $this->editingId], $data + ['user_id' => auth()->id()]);
+
+            // El costo del insumo sigue a su compra más reciente; si el gasto cambió de insumo, también se recalcula el anterior.
+            Ingredient::whereIn('id', array_filter([$previousIngredient, $expense->ingredient_id]))->get()->each->syncCostFromPurchases();
+        });
 
         $message = $this->editingId ? 'Gasto actualizado' : 'Gasto guardado';
         $this->resetForm();
@@ -168,13 +182,22 @@ new #[Title('Gastos')] class extends Component
 
 <div x-data="{
         sheet: $wire.$entangle('showForm'),
-        ings: @js($this->ingredients->map(fn ($i) => ['name' => $i->name, 'unit' => $i->unit])),
+        ings: @js($this->ingredients->map(fn ($i) => ['name' => $i->name, 'unit' => $i->unit, 'cost' => (float) $i->cost_per_unit])),
         get unit() { return this.ings[$wire.ingredient_id]?.unit ?? '' },
         get unitPrice() {
             const q = Number($wire.quantity), t = Number($wire.total);
             if (! $wire.ingredient_id || ! (q > 0) || ! (t > 0)) return null;
             const n = Math.round(t / q * 100) / 100;
             return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: n % 1 ? 2 : 0 }).format(n) + ' por ' + this.unit;
+        },
+        // Un precio muy distinto al de la última compra casi siempre es una cantidad o un total mal escrito.
+        get jump() {
+            const q = Number($wire.quantity), t = Number($wire.total), before = this.ings[$wire.ingredient_id]?.cost ?? 0;
+            if (! $wire.ingredient_id || ! (q > 0) || ! (t > 0) || ! (before > 0)) return '';
+            const ratio = (t / q) / before;
+            if (ratio < 3 && ratio > 1 / 3) return '';
+            const money = (n) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }).format(n);
+            return 'Antes pagabas ' + money(before) + ' por ' + this.unit + ' y ahora sale a ' + money(Math.round(t / q * 100) / 100) + '. ¿La cantidad y el total están bien?';
         },
      }">
     <x-page-header title="Gastos" tour="gastos">
@@ -306,7 +329,8 @@ new #[Title('Gastos')] class extends Component
                 <label class="label" for="total">Total pagado</label>
                 <x-money-input id="total" wire:model="total" placeholder="0" class="!min-h-14 !text-2xl" />
                 @error('total') <p class="error">{{ $message }}</p> @enderror
-                <p class="hint" x-show="unitPrice" x-cloak>Sale a <span class="font-semibold text-ink" x-text="unitPrice"></span>. Se guardará como costo del insumo.</p>
+                <p class="error" x-show="jump" x-cloak x-text="jump"></p>
+                <p class="hint" x-show="unitPrice" x-cloak>Sale a <span class="font-semibold text-ink" x-text="unitPrice"></span>. Ese será el nuevo costo del insumo.</p>
             </div>
 
             {{-- Junto al total para que se elija a conciencia: lo que sale de la caja se descuenta en el corte. --}}
@@ -316,7 +340,7 @@ new #[Title('Gastos')] class extends Component
                     <button type="button" @click="$wire.from_cash = true" :aria-pressed="$wire.from_cash">De la caja</button>
                     <button type="button" @click="$wire.from_cash = false" :aria-pressed="! $wire.from_cash">De otro lado</button>
                 </div>
-                <p class="hint" x-text="$wire.from_cash ? 'Se descuenta del efectivo en el corte de ese día.' : 'Por ejemplo, de tu bolsa o del banco. No toca el corte.'"></p>
+                <p class="hint" x-text="$wire.from_cash ? 'Se descuenta del efectivo en el corte de ese día.' : 'Por ejemplo, de tu bolsillo o de la cuenta del negocio. No afecta el corte.'"></p>
             </div>
 
             <div class="grid gap-4 sm:grid-cols-2">
