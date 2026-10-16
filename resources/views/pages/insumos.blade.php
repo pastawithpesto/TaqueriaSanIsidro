@@ -13,11 +13,6 @@ use Livewire\Component;
 
 new #[Title('Insumos')] class extends Component
 {
-    public const UNITS = ['kg', 'g', 'lt', 'ml', 'pza', 'paquete', 'caja'];
-
-    /** Cambios de unidad que se pueden convertir solos: cantidad nueva = cantidad × factor. */
-    public const CONVERSIONS = ['kg' => ['g' => 1000], 'g' => ['kg' => 0.001], 'lt' => ['ml' => 1000], 'ml' => ['lt' => 0.001]];
-
     public string $search = '';
 
     public bool $showForm = false;
@@ -29,6 +24,12 @@ new #[Title('Insumos')] class extends Component
     public string $unit = 'kg';
 
     public ?string $cost_per_unit = '0';
+
+    /** Cómo se usa en las recetas si no es como se compra: el pan se compra por paquete y se usa por pza. */
+    public ?string $use_unit = null;
+
+    /** Cuántas de esas trae lo que se compra: 8 pza por paquete. */
+    public ?string $use_per_unit = null;
 
     /** El insumo que se edita ya está en recetas, extras o compras. */
     public bool $inUse = false;
@@ -72,6 +73,15 @@ new #[Title('Insumos')] class extends Component
     public function sellIngredient(): ?Ingredient
     {
         return $this->sellId ? Ingredient::find($this->sellId) : null;
+    }
+
+    /** Las de siempre más las que ya se escribieron en otros insumos ("untada"). */
+    #[Computed]
+    public function useUnits()
+    {
+        return collect(Ingredient::USE_UNITS)
+            ->merge(Ingredient::whereNotNull('use_unit')->distinct()->pluck('use_unit'))
+            ->unique()->values();
     }
 
     #[Computed]
@@ -119,8 +129,8 @@ new #[Title('Insumos')] class extends Component
         $this->sellName = Product::where('name', $ingredient->name)->exists() ? '' : $ingredient->name;
         $this->sellPrice = null;
         $this->sellCategory = $this->soldAs->first()?->category;
-        // Por pieza lo normal es una por venta; por kilo o litro hay que decir cuánto lleva cada una.
-        $this->sellQuantity = in_array($ingredient->unit, ['pza', 'paquete', 'caja'], true) ? '1' : '';
+        // Por pieza o porción lo normal es una por venta; por kilo o litro hay que decir cuánto lleva cada una.
+        $this->sellQuantity = in_array($ingredient->recipeUnit(), ['kg', 'g', 'lt', 'ml'], true) ? '' : '1';
     }
 
     public function sell(): void
@@ -174,6 +184,8 @@ new #[Title('Insumos')] class extends Component
         $this->name = $i->name;
         $this->unit = $i->unit;
         $this->cost_per_unit = rtrim(rtrim((string) $i->cost_per_unit, '0'), '.') ?: '0';
+        $this->use_unit = $i->use_unit;
+        $this->use_per_unit = $i->use_unit ? rtrim(rtrim((string) $i->use_per_unit, '0'), '.') : null;
         $this->inUse = $this->isInUse($i);
         $this->showForm = true;
     }
@@ -185,7 +197,7 @@ new #[Title('Insumos')] class extends Component
 
     protected function resetForm(): void
     {
-        $this->reset('showForm', 'editingId', 'name', 'inUse');
+        $this->reset('showForm', 'editingId', 'name', 'use_unit', 'use_per_unit', 'inUse');
         $this->unit = 'kg';
         $this->cost_per_unit = '0';
         $this->resetErrorBag();
@@ -193,52 +205,110 @@ new #[Title('Insumos')] class extends Component
 
     public function save(): void
     {
+        // Usarlo como se compra es no tener unidad de uso; de kg a g la equivalencia no se pregunta.
+        $this->use_unit = Str::lower(trim((string) $this->use_unit)) ?: null;
+        if ($this->use_unit === $this->unit) {
+            $this->use_unit = null;
+        }
+        $known = $this->use_unit ? Ingredient::factorBetween($this->unit, $this->use_unit) : null;
+        $this->use_per_unit = $this->use_unit ? ($known !== null ? (string) $known : $this->use_per_unit) : null;
+
         $data = $this->validate([
             'name' => ['required', 'string', 'max:255'],
-            'unit' => ['required', 'in:'.implode(',', self::UNITS)],
+            'unit' => ['required', Rule::in(Ingredient::UNITS)],
             'cost_per_unit' => ['required', 'numeric', 'min:0', 'max:999999'],
-        ]);
+            'use_unit' => ['nullable', 'string', 'max:20'],
+            'use_per_unit' => ['nullable', 'required_with:use_unit', 'numeric', 'gt:0', 'max:999999'],
+        ], [
+            'use_per_unit.required_with' => 'Escribe cuántas rinde.',
+        ], ['use_unit' => 'unidad', 'use_per_unit' => 'cantidad']);
 
         $ingredient = $this->editingId ? Ingredient::findOrFail($this->editingId) : null;
-        $message = 'Insumo guardado';
 
-        // Cambiar la unidad de un insumo en uso dejaría mal las recetas: se convierten las cantidades o no se permite.
-        if ($ingredient && $ingredient->unit !== $data['unit'] && $this->isInUse($ingredient)) {
-            $factor = self::CONVERSIONS[$ingredient->unit][$data['unit']] ?? null;
+        if (! $ingredient) {
+            Ingredient::create($data);
+            $this->saved('Insumo guardado');
 
-            if (! $factor) {
-                $this->addError('unit', "Ya se usa en recetas o compras en {$ingredient->unit}. Para medirlo en {$data['unit']}, crea un insumo nuevo.");
-
-                return;
-            }
-
-            // Si no se tocó el costo, también se convierte (200 por kg son 0.2 por g).
-            if (abs((float) $data['cost_per_unit'] - (float) $ingredient->cost_per_unit) < 0.00005) {
-                $data['cost_per_unit'] = round((float) $ingredient->cost_per_unit / $factor, 4);
-            }
-
-            DB::transaction(function () use ($ingredient, $factor) {
-                $scale = ['quantity' => DB::raw('quantity * '.$factor)];
-                DB::table('product_ingredient')->where('ingredient_id', $ingredient->id)->update($scale);
-                ProductExtra::where('ingredient_id', $ingredient->id)->whereNotNull('quantity')->update($scale);
-                Expense::where('ingredient_id', $ingredient->id)->whereNotNull('quantity')->update($scale);
-            });
-
-            $message = "Insumo guardado. Recetas y compras pasaron a {$data['unit']}.";
+            return;
         }
 
-        $ingredient ? $ingredient->update($data) : Ingredient::create($data);
+        // Las recetas van en la unidad de uso y las compras en la de compra: si cambian, se convierten las cantidades.
+        $old = ['unit' => $ingredient->unit, 'use' => $ingredient->recipeUnit(), 'per' => $ingredient->usesPerUnit()];
+        $new = ['unit' => $data['unit'], 'use' => $data['use_unit'] ?? $data['unit'], 'per' => $data['use_unit'] ? (float) $data['use_per_unit'] : 1.0];
+        $purchaseFactor = $this->purchaseFactor($old, $new);
+        $recipeFactor = Ingredient::factorBetween($old['use'], $new['use'])
+            ?? ($purchaseFactor !== null ? $purchaseFactor * $new['per'] / $old['per'] : null);
 
+        $changes = fn (?float $factor) => $factor === null || abs($factor - 1) > 0.000001;
+        $convertRecipes = $changes($recipeFactor) && $this->isInRecipes($ingredient);
+        $convertPurchases = $changes($purchaseFactor) && $ingredient->expenses()->whereNotNull('quantity')->exists();
+
+        if (($convertRecipes && $recipeFactor === null) || ($convertPurchases && $purchaseFactor === null)) {
+            $this->addError('unit', "Ya se usa por {$old['unit']}. Déjalo así y abajo di cómo lo usas, o crea otro insumo.");
+
+            return;
+        }
+
+        // Si no se tocó el costo, también se convierte: $6 por pza son $48 por paquete de 8.
+        if ($changes($purchaseFactor) && abs((float) $data['cost_per_unit'] - (float) $ingredient->cost_per_unit) < 0.00005) {
+            $data['cost_per_unit'] = round((float) $ingredient->cost_per_unit / $purchaseFactor, 4);
+        }
+
+        DB::transaction(function () use ($ingredient, $data, $convertRecipes, $recipeFactor, $convertPurchases, $purchaseFactor) {
+            if ($convertRecipes) {
+                $scale = ['quantity' => DB::raw('quantity * '.sprintf('%.10F', $recipeFactor))];
+                DB::table('product_ingredient')->where('ingredient_id', $ingredient->id)->update($scale);
+                ProductExtra::where('ingredient_id', $ingredient->id)->whereNotNull('quantity')->update($scale);
+            }
+            if ($convertPurchases) {
+                Expense::where('ingredient_id', $ingredient->id)->whereNotNull('quantity')
+                    ->update(['quantity' => DB::raw('quantity * '.sprintf('%.10F', $purchaseFactor))]);
+            }
+            $ingredient->update($data);
+        });
+
+        $moved = array_filter([
+            $convertRecipes ? 'las recetas pasaron a '.Ingredient::unitLabel($new['use'], 2) : null,
+            $convertPurchases ? 'las compras pasaron a '.Ingredient::unitLabel($new['unit'], 2) : null,
+        ]);
+        $this->saved($moved ? 'Insumo guardado: '.implode(' y ', $moved).'.' : 'Insumo guardado');
+    }
+
+    protected function saved(string $message): void
+    {
         $this->resetForm();
-        unset($this->ingredients, $this->hasAny);
+        unset($this->ingredients, $this->hasAny, $this->useUnits);
         $this->dispatch('toast', message: $message);
+    }
+
+    /**
+     * Cuántas unidades de compra nuevas es una de las anteriores, pasando por la de uso si hace falta:
+     * de pza a paquete de 8 pza, una pza es 0.125 paquetes. Null si no hay forma de saberlo.
+     *
+     * @param  array{unit: string, use: string, per: float}  $old
+     * @param  array{unit: string, use: string, per: float}  $new
+     */
+    protected function purchaseFactor(array $old, array $new): ?float
+    {
+        foreach ([[$old['unit'], 1.0], [$old['use'], $old['per']]] as [$from, $amount]) {
+            foreach ([[$new['unit'], 1.0], [$new['use'], $new['per']]] as [$to, $per]) {
+                if (($factor = Ingredient::factorBetween($from, $to)) !== null) {
+                    return $amount * $factor / $per;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    protected function isInRecipes(Ingredient $ingredient): bool
+    {
+        return $ingredient->products()->exists() || ProductExtra::where('ingredient_id', $ingredient->id)->whereNotNull('quantity')->exists();
     }
 
     protected function isInUse(Ingredient $ingredient): bool
     {
-        return $ingredient->products()->exists()
-            || ProductExtra::where('ingredient_id', $ingredient->id)->exists()
-            || $ingredient->expenses()->whereNotNull('quantity')->exists();
+        return $this->isInRecipes($ingredient) || $ingredient->expenses()->whereNotNull('quantity')->exists();
     }
 
     public function toggle(int $id): void
@@ -294,6 +364,9 @@ new #[Title('Insumos')] class extends Component
                             @unless ($i->active) <span class="badge bg-sunken text-muted">Inactivo</span> @endunless
                             {{ $i->usageLabel() }}
                         </span>
+                        @if ($useCost = $i->useCostLabel())
+                            <span class="mt-0.5 block text-sm text-muted">{{ $useCost }}</span>
+                        @endif
                     </button>
                     <span class="text-right">
                         <span class="num block text-[1.375rem] leading-tight font-bold">{{ money($i->cost_per_unit) }}</span>
@@ -337,11 +410,11 @@ new #[Title('Insumos')] class extends Component
                         <select id="unit" wire:model="unit" class="input"
                                 x-data="{ from: '' }" @focus="from = $el.value"
                                 @change="
-                                    const factor = @js($this::CONVERSIONS)[from]?.[$el.value];
+                                    const factor = @js(\App\Models\Ingredient::CONVERSIONS)[from]?.[$el.value];
                                     if ($wire.editingId && factor && Number($wire.cost_per_unit) > 0) $wire.cost_per_unit = String(Math.round(Number($wire.cost_per_unit) / factor * 10000) / 10000);
                                     from = $el.value;
                                 ">
-                            @foreach ($this::UNITS as $u)
+                            @foreach (\App\Models\Ingredient::UNITS as $u)
                                 <option value="{{ $u }}">{{ $u }}</option>
                             @endforeach
                         </select>
@@ -354,8 +427,53 @@ new #[Title('Insumos')] class extends Component
                     </div>
                 </div>
                 <p class="hint">Si no sabes el costo exacto, pon uno aproximado. Se corrige solo cuando registres la compra.</p>
+
+                {{-- Lo que no se usa como se compra: la receta dice "1 pza" de pan aunque se compre por paquete. --}}
+                <section class="space-y-3 rounded-2xl bg-sunken/60 p-4"
+                         x-data="{
+                            conversions: @js(\App\Models\Ingredient::CONVERSIONS),
+                            get use() { return String($wire.use_unit ?? '').trim().toLowerCase() },
+                            get same() { return ! this.use || this.use === $wire.unit },
+                            get known() { return this.same ? null : (this.conversions[$wire.unit]?.[this.use] ?? null) },
+                            get per() { return this.known ?? Number($wire.use_per_unit) },
+                            money(n) {
+                                const whole = Math.abs(n % 1) < 0.005;
+                                return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(n);
+                            },
+                            get costText() {
+                                const cost = Number($wire.cost_per_unit);
+                                if (this.same || ! (this.per > 0) || ! (cost > 0)) return '';
+                                const each = cost / this.per;
+                                return ['g', 'ml'].includes(this.use)
+                                    ? '100 ' + this.use + ' te cuestan ' + this.money(each * 100) + '.'
+                                    : 'Cada ' + this.use + ' te cuesta ' + this.money(each) + '.';
+                            },
+                         }">
+                    <div>
+                        <h3 class="section-title">En las recetas</h3>
+                        <p class="text-sm text-muted">Si no lo usas como lo compras. El pan se compra por paquete y se usa por pza; la mayonesa, por bote y por cucharada.</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div :class="{ 'col-span-2': same }">
+                            <label class="label" for="use-unit">Se usa por</label>
+                            <x-combobox id="use-unit" bind="$wire.use_unit" :options="$this->useUnits->all()" none="Como se compra" create="Usar" maxlength="20" />
+                            @error('use_unit') <p class="error">{{ $message }}</p> @enderror
+                        </div>
+                        <div x-show="! same && known === null" x-cloak>
+                            <label class="label" for="use-per-unit" x-text="'Cada ' + $wire.unit + ' rinde'"></label>
+                            <div class="relative">
+                                <input id="use-per-unit" type="number" inputmode="decimal" step="any" min="0" wire:model="use_per_unit" class="input pr-24">
+                                <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm text-muted" x-text="unitLabel(use, 2)"></span>
+                            </div>
+                            @error('use_per_unit') <p class="error">{{ $message }}</p> @enderror
+                        </div>
+                        <p x-show="known !== null" x-cloak class="self-end pb-3 text-[15px]" x-text="'1 ' + $wire.unit + ' son ' + known + ' ' + use + '.'"></p>
+                    </div>
+                    <p class="font-semibold" x-show="costText" x-cloak x-text="costText"></p>
+                    <p class="hint" x-show="! same && known === null" x-cloak>Si no sabes cuántas salen, calcula. Lo corriges cuando veas cuánto te dura.</p>
+                </section>
                 @if ($inUse)
-                    <p class="hint">Ya se usa en recetas o compras. Si cambias de kg a g o de lt a ml, las cantidades se convierten solas.</p>
+                    <p class="hint">Ya se usa en recetas o compras. Si cambias cómo se compra o se usa, las cantidades se convierten solas.</p>
                 @endif
             </form>
             <x-slot:footer>
@@ -372,7 +490,7 @@ new #[Title('Insumos')] class extends Component
             @if ($ingredient = $this->sellIngredient)
                 <form wire:submit="sell" id="sell-form" class="space-y-4" wire:loading.remove wire:target="startSelling"
                       x-data="{
-                        cost: {{ (float) $ingredient->cost_per_unit }},
+                        cost: {{ $ingredient->costPerUse() }},
                         money(n) {
                             const whole = Math.abs(n % 1) < 0.005;
                             return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(n);
@@ -418,13 +536,13 @@ new #[Title('Insumos')] class extends Component
                         <div>
                             <label class="label" for="sell-quantity">Cada venta usa</label>
                             <div class="relative">
-                                <input id="sell-quantity" type="number" inputmode="decimal" step="any" min="0" wire:model="sellQuantity" class="input pr-16">
-                                <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm text-muted">{{ $ingredient->unit }}</span>
+                                <input id="sell-quantity" type="number" inputmode="decimal" step="any" min="0" wire:model="sellQuantity" class="input pr-24">
+                                <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm text-muted" x-text="unitLabel(@js($ingredient->recipeUnit()), Number($wire.sellQuantity) || 1)"></span>
                             </div>
                             @error('sellQuantity') <p class="error">{{ $message }}</p> @enderror
                         </div>
                     </div>
-                    @if ($example = ['kg' => 'Si vendes el kilo entero, cada venta usa 1; medio kilo, 0.5.', 'lt' => 'Si vendes el litro entero, cada venta usa 1; medio litro, 0.5.', 'g' => 'Un cuarto de kilo son 250 g.', 'ml' => 'Medio litro son 500 ml.'][$ingredient->unit] ?? null)
+                    @if ($example = ['kg' => 'Si vendes el kilo entero, cada venta usa 1; medio kilo, 0.5.', 'lt' => 'Si vendes el litro entero, cada venta usa 1; medio litro, 0.5.', 'g' => 'Un cuarto de kilo son 250 g.', 'ml' => 'Medio litro son 500 ml.'][$ingredient->recipeUnit()] ?? null)
                         <p class="hint -mt-2">{{ $example }}</p>
                     @endif
                     <div>

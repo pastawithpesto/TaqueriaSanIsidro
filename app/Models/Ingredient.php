@@ -7,15 +7,79 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'unit', 'cost_per_unit', 'active'])]
+#[Fillable(['name', 'unit', 'cost_per_unit', 'use_unit', 'use_per_unit', 'active'])]
 class Ingredient extends Model
 {
+    /** Cómo se compra. */
+    public const UNITS = ['kg', 'g', 'lt', 'ml', 'pza', 'paquete', 'caja', 'bote', 'bolsa', 'manojo'];
+
+    /** Cómo se suele usar en las recetas; se puede escribir otra, como "untada". */
+    public const USE_UNITS = ['g', 'ml', 'pza', 'cucharada', 'porción', 'rebanada'];
+
+    /** Equivalencias que no hay que preguntar: cantidad en la otra unidad = cantidad × factor. */
+    public const CONVERSIONS = ['kg' => ['g' => 1000], 'g' => ['kg' => 0.001], 'lt' => ['ml' => 1000], 'ml' => ['lt' => 0.001]];
+
+    /** Abreviaturas, que no cambian en plural. */
+    protected const ABBREVIATIONS = ['kg', 'g', 'lt', 'ml', 'pza'];
+
     protected function casts(): array
     {
         return [
             'cost_per_unit' => 'decimal:4',
+            'use_per_unit' => 'decimal:4',
             'active' => 'boolean',
         ];
+    }
+
+    /** Cuántas $to son una $from (1 kg = 1000 g); null si no se puede saber sin preguntar. */
+    public static function factorBetween(string $from, string $to): ?float
+    {
+        return $from === $to ? 1.0 : (self::CONVERSIONS[$from][$to] ?? null);
+    }
+
+    /** "porciones" para 4 y "porción" para 1. Las abreviaturas no cambian: 4 pza, 100 g. */
+    public static function unitLabel(string $unit, float $quantity = 1): string
+    {
+        if (abs($quantity - 1) < 0.00001 || in_array($unit, self::ABBREVIATIONS, true)) {
+            return $unit;
+        }
+
+        return match (true) {
+            str_ends_with($unit, 'ión') => mb_substr($unit, 0, -3).'iones',
+            str_ends_with($unit, 'z') => mb_substr($unit, 0, -1).'ces',
+            (bool) preg_match('/[aeiouáéó]$/u', $unit) => $unit.'s',
+            default => $unit.'es',
+        };
+    }
+
+    /** En qué va en las recetas y los extras: la unidad de uso o, si no tiene, la de compra. */
+    public function recipeUnit(): string
+    {
+        return $this->use_unit ?? $this->unit;
+    }
+
+    /** Cuántas unidades de receta trae lo que se compra: 8 si el paquete trae 8 pza, 1 si se usa como se compra. */
+    public function usesPerUnit(): float
+    {
+        return $this->use_unit && (float) $this->use_per_unit > 0 ? (float) $this->use_per_unit : 1.0;
+    }
+
+    /** Costo de una unidad de receta: con el paquete a $45 y 8 pza, $5.625. */
+    public function costPerUse(): float
+    {
+        return (float) $this->cost_per_unit / $this->usesPerUnit();
+    }
+
+    /** "$5.63 por pza" o "$18 por 100 g"; null si se usa como se compra. */
+    public function useCostLabel(): ?string
+    {
+        if (! $this->use_unit) {
+            return null;
+        }
+
+        return in_array($this->use_unit, ['g', 'ml'], true)
+            ? money($this->costPerUse() * 100).' por 100 '.$this->use_unit
+            : money($this->costPerUse()).' por '.$this->use_unit;
     }
 
     public function products(): BelongsToMany

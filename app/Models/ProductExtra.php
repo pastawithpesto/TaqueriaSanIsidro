@@ -27,8 +27,9 @@ class ProductExtra extends Model
         return $this->belongsTo(Ingredient::class);
     }
 
+    /** La cantidad va en la unidad de uso del insumo, como en las recetas. */
     public function cost(): float
     {
-        return $this->ingredient && $this->quantity ? (float) $this->quantity * (float) $this->ingredient->cost_per_unit : 0.0;
+        return $this->ingredient && $this->quantity ? (float) $this->quantity * $this->ingredient->costPerUse() : 0.0;
     }
 }

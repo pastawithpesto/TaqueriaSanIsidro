@@ -59,11 +59,12 @@ new #[Title('Lista de compras')] class extends Component
         $usage = $this->forecast['usage'];
         $factor = $this->buffer ? 1.1 : 1.0;
 
+        // Lo usado va en la unidad de las recetas (pza, porción); se compra en la del insumo (paquete, manojo).
         return Ingredient::whereIn('id', array_keys($usage))->get()
             ->map(function ($i) use ($usage, $factor) {
-                $qty = $this->roundUp($usage[$i->id] * $factor, $i->unit);
+                $qty = $this->roundUp($usage[$i->id] / $i->usesPerUnit() * $factor, $i->unit);
 
-                return ['name' => $i->name, 'unit' => $i->unit, 'qty' => $qty, 'cost' => $qty * (float) $i->cost_per_unit];
+                return ['name' => $i->name, 'unit' => Ingredient::unitLabel($i->unit, $qty), 'qty' => $qty, 'cost' => $qty * (float) $i->cost_per_unit];
             })
             ->filter(fn ($r) => $r['qty'] > 0)
             ->sortByDesc('cost')

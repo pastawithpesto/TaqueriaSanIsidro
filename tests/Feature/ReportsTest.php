@@ -91,6 +91,24 @@ class ReportsTest extends TestCase
         $this->assertEquals(1.3, $withBuffer['Bistec']['qty']); // 1.265 -> 1.3
     }
 
+    public function test_shopping_list_buys_by_the_pack_what_recipes_use_by_the_piece(): void
+    {
+        $target = CarbonImmutable::parse('next friday');
+        $this->travelTo($target->subDay()->setTime(12, 0));
+        $bread = Ingredient::create(['name' => 'Pan', 'unit' => 'paquete', 'cost_per_unit' => 45, 'use_unit' => 'pza', 'use_per_unit' => 8]);
+        $this->taco->ingredients()->attach($bread, ['quantity' => 1, 'removable' => false]);
+        $this->sale($target->subWeek()->setTime(20, 0), 20); // 20 pza = 2.5 paquetes
+
+        $rows = Livewire::test('pages::compras')
+            ->set('date', $target->toDateString())
+            ->set('buffer', false)
+            ->get('rows')->keyBy('name');
+
+        $this->assertEquals(3, $rows['Pan']['qty']);
+        $this->assertSame('paquetes', $rows['Pan']['unit']);
+        $this->assertEquals(135, $rows['Pan']['cost']);
+    }
+
     public function test_shopping_list_without_history_shows_empty_state(): void
     {
         Livewire::test('pages::compras')->assertSee('Todavía no hay suficientes ventas');

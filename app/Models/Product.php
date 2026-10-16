@@ -72,7 +72,7 @@ class Product extends Model
     }
 
     /**
-     * Costo de una pieza con el costo actual de cada insumo.
+     * Costo de una pieza con el costo actual de cada insumo. La receta va en la unidad de uso del insumo.
      *
      * @param  array<int>  $without  insumos que el cliente pidió quitar
      */
@@ -80,6 +80,6 @@ class Product extends Model
     {
         return $this->ingredients
             ->reject(fn (Ingredient $i) => in_array($i->id, $without) && $i->pivot->removable)
-            ->sum(fn (Ingredient $i) => $i->pivot->quantity * $i->cost_per_unit);
+            ->sum(fn (Ingredient $i) => $i->pivot->quantity * $i->costPerUse());
     }
 }

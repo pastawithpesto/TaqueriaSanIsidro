@@ -288,7 +288,11 @@ new #[Title('Productos')] class extends Component
 
 <div x-data="{
         sheet: $wire.$entangle('showForm'),
-        ings: @js($this->allIngredients->map(fn ($i) => ['name' => $i->name, 'unit' => $i->unit, 'cost' => (float) $i->cost_per_unit, 'active' => $i->active])),
+        {{-- unit y cost son los de la receta (pza de pan, aunque se compre por paquete); whole: se usa entero como se compra. --}}
+        ings: @js($this->allIngredients->map(fn ($i) => [
+            'name' => $i->name, 'unit' => $i->recipeUnit(), 'cost' => $i->costPerUse(), 'active' => $i->active,
+            'whole' => ! $i->use_unit && ! in_array($i->unit, ['kg', 'g', 'lt', 'ml'], true),
+        ])),
         newIng: '',
         newQty: '',
         addError: '',
@@ -421,7 +425,7 @@ new #[Title('Productos')] class extends Component
     @endif
     </div>
 
-    @php $ingredientOptions = $this->ingredients->map(fn ($i) => ['value' => $i->id, 'label' => $i->name, 'hint' => $i->unit])->values()->all(); @endphp
+    @php $ingredientOptions = $this->ingredients->map(fn ($i) => ['value' => $i->id, 'label' => $i->name, 'hint' => $i->recipeUnit()])->values()->all(); @endphp
     <x-sheet :title="$editingId ? 'Editar producto' : 'Nuevo producto'" open="sheet" dismiss="sheet = false; $wire.cancel()">
         <div wire:loading.block wire:target="edit,duplicate,create" class="space-y-4" aria-hidden="true">
             <div class="h-12 animate-pulse rounded-xl bg-sunken"></div>
@@ -457,25 +461,23 @@ new #[Title('Productos')] class extends Component
                 {{-- Lo maneja el navegador: Livewire no debe reemplazarlo al responder. --}}
                 <div wire:ignore class="space-y-3">
                 <template x-for="(row, index) in $wire.recipe ?? []" :key="row.ingredient_id">
-                    <div class="flex items-center gap-2">
-                        <button type="button" @click="toggleRemovable(index)" :aria-pressed="!! row.removable"
-                                class="grid size-9 shrink-0 place-items-center rounded-lg border motion-safe:transition"
-                                :class="row.removable ? 'border-chile bg-chile text-white' : 'border-line bg-surface text-muted'"
-                                :title="row.removable ? 'Se puede pedir sin este ingrediente' : 'Siempre lo lleva'"
-                                :aria-label="'Se puede pedir sin ' + (ings[row.ingredient_id]?.name ?? '')">
-                            <x-icon name="x" class="size-4" />
-                        </button>
-                        <span class="min-w-0 flex-1 truncate text-[15px] font-medium" x-text="(ings[row.ingredient_id]?.name ?? 'Insumo borrado') + (ings[row.ingredient_id]?.active === false ? ' (inactivo)' : '')"></span>
-                        <input type="number" step="any" inputmode="decimal" x-model="row.quantity" class="input !min-h-10 w-24 !px-2.5 text-right" :aria-label="'Cantidad de ' + (ings[row.ingredient_id]?.name ?? '')">
-                        <span class="w-12 text-sm text-muted" x-text="ings[row.ingredient_id]?.unit"></span>
-                        <button type="button" @click="remove(index)" class="btn-quiet size-9 justify-center !px-0" :aria-label="'Quitar ' + (ings[row.ingredient_id]?.name ?? '')"><x-icon name="x" class="size-4" /></button>
+                    <div class="space-y-2 rounded-xl bg-surface p-3" x-data="{ get ing() { return ings[row.ingredient_id] ?? { name: 'Insumo borrado', unit: '', cost: 0 } } }">
+                        <div class="flex items-start gap-2">
+                            <span class="min-w-0 flex-1 pt-1.5 text-[15px] font-semibold break-words" x-text="ing.name + (ing.active === false ? ' (inactivo)' : '')"></span>
+                            <span class="num shrink-0 pt-1.5 text-sm text-muted" x-text="fmt((Number(row.quantity) || 0) * ing.cost)"></span>
+                            <button type="button" @click="remove(index)" class="btn-quiet -mr-1 size-9 shrink-0 justify-center !px-0" :aria-label="'Quitar ' + ing.name"><x-icon name="trash" class="size-4" /></button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <div class="relative w-36">
+                                <input type="number" step="any" inputmode="decimal" x-model="row.quantity" class="input !min-h-10 pr-24" :aria-label="'Cantidad de ' + ing.name">
+                                <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted" x-text="unitLabel(ing.unit, Number(row.quantity) || 1)"></span>
+                            </div>
+                            <button type="button" @click="toggleRemovable(index)" class="chip" :aria-pressed="!! row.removable">Se puede quitar</button>
+                        </div>
                     </div>
                 </template>
                 <p x-show="! ($wire.recipe ?? []).length" class="text-sm text-muted">Aún no hay insumos en la receta.</p>
-                <p x-show="($wire.recipe ?? []).length" class="flex items-center gap-2 text-sm text-muted">
-                    <span class="grid size-5 shrink-0 place-items-center rounded bg-chile text-white"><x-icon name="x" class="size-3" /></span>
-                    Marca lo que el cliente puede pedir sin, como cebolla o cilantro. Al vender aparecerá "Sin cebolla".
-                </p>
+                <p x-show="($wire.recipe ?? []).length" class="hint">Marca "Se puede quitar" en lo que el cliente puede pedir sin, como cebolla o cilantro. Al vender aparecerá "Sin cebolla".</p>
                 </div>
                 @if ($errors->has('recipe.*'))
                     <p class="error">Revisa las cantidades de la receta: todas deben ser mayores a cero.</p>
@@ -490,14 +492,16 @@ new #[Title('Productos')] class extends Component
                             <div class="min-w-40 flex-1" @pick="$nextTick(() => $refs.newQty?.focus())">
                                 <x-combobox bind="newIng" :options="$ingredientOptions" placeholder="Buscar insumo" aria-label="Insumo" />
                             </div>
-                            <div class="relative w-32">
-                                <input x-ref="newQty" type="number" step="any" inputmode="decimal" x-model="newQty" @keydown.enter.prevent="add()" class="input pr-12" placeholder="Cantidad" aria-label="Cantidad">
-                                <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted" x-text="ings[newIng]?.unit ?? ''"></span>
+                            <div class="relative w-36">
+                                <input x-ref="newQty" type="number" step="any" inputmode="decimal" x-model="newQty" @keydown.enter.prevent="add()" class="input" :class="{ 'pr-24': newIng }" placeholder="Cantidad" aria-label="Cantidad">
+                                <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted" x-text="unitLabel(ings[newIng]?.unit, Number(newQty) || 1)"></span>
                             </div>
                             <button type="button" @click="add()" class="btn h-12">Agregar</button>
                         </div>
                         <p class="error" x-ref="addError" x-show="addError" x-text="addError" x-cloak></p>
-                        <p class="hint" x-show="newIng && ings[newIng]?.unit === 'kg'" x-cloak>En kilos: 0.05 kg son 50 gramos.</p>
+                        <p class="hint" x-show="newIng && ings[newIng]?.unit === 'kg'" x-cloak>En kilos: 0.05 kg son 50 gramos. Si prefieres gramos, cámbialo en Insumos.</p>
+                        <p class="hint" x-show="newIng && ings[newIng]?.whole && Number(newQty) > 0 && Number(newQty) < 1" x-cloak
+                           x-text="'¿Usas solo una parte? En Insumos di cuántas porciones rinde cada ' + ings[newIng]?.unit + ' y aquí pon 1.'"></p>
                     </div>
                 @endif
 
@@ -561,9 +565,9 @@ new #[Title('Productos')] class extends Component
                                 <div class="min-w-0 flex-1">
                                     <x-combobox bind="extra.ingredient_id" :options="$ingredientOptions" none="No usa insumo" class="!min-h-10" aria-label="Insumo que usa" />
                                 </div>
-                                <div class="relative w-28" x-show="extra.ingredient_id">
-                                    <input type="number" step="any" min="0" inputmode="decimal" x-model="extra.quantity" class="input !min-h-10 pr-11" placeholder="Cant." aria-label="Cantidad de insumo">
-                                    <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted" x-text="ings[extra.ingredient_id]?.unit ?? ''"></span>
+                                <div class="relative w-36" x-show="extra.ingredient_id">
+                                    <input type="number" step="any" min="0" inputmode="decimal" x-model="extra.quantity" class="input !min-h-10 pr-22" placeholder="Cant." aria-label="Cantidad de insumo">
+                                    <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted" x-text="unitLabel(ings[extra.ingredient_id]?.unit, Number(extra.quantity) || 1)"></span>
                                 </div>
                             </div>
                         </div>

@@ -299,9 +299,85 @@ class CatalogTest extends TestCase
             ->call('edit', $meat->id)
             ->set('unit', 'pza')
             ->call('save')
-            ->assertHasErrors(['unit' => 'Ya se usa en recetas o compras en kg. Para medirlo en pza, crea un insumo nuevo.']);
+            ->assertHasErrors(['unit' => 'Ya se usa por kg. Déjalo así y abajo di cómo lo usas, o crea otro insumo.']);
 
         $this->assertSame('kg', $meat->fresh()->unit);
+    }
+
+    public function test_using_an_ingredient_by_portion_turns_recipe_fractions_into_portions(): void
+    {
+        $cilantro = Ingredient::create(['name' => 'Cilantro', 'unit' => 'pza', 'cost_per_unit' => 10]);
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $taco->ingredients()->attach($cilantro, ['quantity' => 0.1]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $cilantro->id)
+            ->set('use_unit', 'Porción')
+            ->set('use_per_unit', '40')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $cilantro->refresh();
+        $this->assertSame('porción', $cilantro->use_unit);
+        $this->assertSame('40.0000', $cilantro->use_per_unit);
+        $this->assertSame(0.25, $cilantro->costPerUse());
+        $this->assertSame('4.0000', $taco->ingredients()->sole()->pivot->quantity);
+        $this->assertSame(1.0, $taco->fresh()->unitCost());
+    }
+
+    public function test_buying_by_the_pack_and_using_by_the_piece_keeps_recipes_and_converts_purchases(): void
+    {
+        $bread = Ingredient::create(['name' => 'Pan', 'unit' => 'pza', 'cost_per_unit' => 6]);
+        $burger = Product::create(['name' => 'Hamburguesa', 'price' => 50]);
+        $burger->ingredients()->attach($bread, ['quantity' => 1]);
+        $purchase = Expense::create(['category' => 'ingredients', 'ingredient_id' => $bread->id, 'quantity' => 16, 'total' => 96, 'spent_on' => today()]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $bread->id)
+            ->set('unit', 'paquete')
+            ->set('use_unit', 'pza')
+            ->set('use_per_unit', '8')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $bread->refresh();
+        $this->assertSame('paquete', $bread->unit);
+        $this->assertSame('48.0000', $bread->cost_per_unit);
+        $this->assertSame('1.0000', $burger->ingredients()->sole()->pivot->quantity);
+        $this->assertSame('2.0000', $purchase->fresh()->quantity);
+        $this->assertSame(6.0, $burger->fresh()->unitCost());
+    }
+
+    public function test_using_kilos_by_the_gram_needs_no_equivalence(): void
+    {
+        $meat = Ingredient::create(['name' => 'Bistec', 'unit' => 'kg', 'cost_per_unit' => 180]);
+        $taco = Product::create(['name' => 'Taco', 'price' => 20]);
+        $taco->ingredients()->attach($meat, ['quantity' => 0.04]);
+        $taco->extras()->create(['name' => 'Extra carne', 'price' => 10, 'ingredient_id' => $meat->id, 'quantity' => 0.03]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $meat->id)
+            ->set('use_unit', 'g')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('1000.0000', $meat->fresh()->use_per_unit);
+        $this->assertSame('40.0000', $taco->ingredients()->sole()->pivot->quantity);
+        $this->assertSame('30.0000', $taco->extras()->sole()->quantity);
+        $this->assertEqualsWithDelta(5.4, $taco->extras()->sole()->cost(), 0.0001);
+    }
+
+    public function test_using_an_ingredient_in_another_unit_asks_how_many_it_yields(): void
+    {
+        $butter = Ingredient::create(['name' => 'Mantequilla', 'unit' => 'bote', 'cost_per_unit' => 60]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $butter->id)
+            ->set('use_unit', 'untada')
+            ->call('save')
+            ->assertHasErrors(['use_per_unit' => 'Escribe cuántas rinde.']);
+
+        $this->assertNull($butter->fresh()->use_unit);
     }
 
     public function test_dragging_a_product_reorders_only_its_category(): void

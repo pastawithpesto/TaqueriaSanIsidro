@@ -167,3 +167,11 @@ window.bump = (el) => {
         { duration: 220, easing: 'cubic-bezier(.3,.7,.4,1.4)' },
     );
 };
+
+// "porciones" para 4 y "porción" para 1; las abreviaturas no cambian (4 pza). Igual que Ingredient::unitLabel.
+window.unitLabel = (unit, quantity = 1) => {
+    if (!unit || Math.abs(quantity - 1) < 0.00001 || ['kg', 'g', 'lt', 'ml', 'pza'].includes(unit)) return unit ?? '';
+    if (unit.endsWith('ión')) return unit.slice(0, -3) + 'iones';
+    if (unit.endsWith('z')) return unit.slice(0, -1) + 'ces';
+    return /[aeiouáéó]$/.test(unit) ? unit + 's' : unit + 'es';
+};
