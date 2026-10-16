@@ -3,6 +3,7 @@
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
+use App\Support\OnlineOrder;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -10,6 +11,41 @@ use Livewire\Component;
 
 new #[Title('Pedidos')] class extends Component
 {
+    /** Pedidos que hicieron los clientes en línea y esperan una respuesta: el que lleva más tiempo, primero. */
+    #[Computed]
+    public function requested()
+    {
+        return Order::with('items')->requested()->orderBy('created_at')->get();
+    }
+
+    public function accept(int $id): void
+    {
+        $order = Order::requested()->find($id);
+
+        if (! $order || ! OnlineOrder::accept($order)) {
+            $this->dispatch('toast', message: 'Ese pedido ya no está por aceptar. Recarga la lista.', type: 'error');
+        } else {
+            $this->dispatch('toast', message: 'Pedido de '.$order->label.' aceptado: es el #'.$order->fresh()->daily_number.'.');
+        }
+
+        unset($this->requested, $this->pending);
+        $this->dispatch('pending-count', count: Order::pendingCount());
+    }
+
+    public function reject(int $id, string $reason = ''): void
+    {
+        $order = Order::requested()->find($id);
+
+        if (! $order || ! OnlineOrder::reject($order, $reason)) {
+            $this->dispatch('toast', message: 'Ese pedido ya no está por aceptar. Recarga la lista.', type: 'error');
+        } else {
+            $this->dispatch('toast', message: 'Pedido de '.$order->label.' rechazado. Se lo decimos en su página.');
+        }
+
+        unset($this->requested);
+        $this->dispatch('pending-count', count: Order::pendingCount());
+    }
+
     /** Activos: primero el que lleva más tiempo esperando. */
     #[Computed]
     public function pending()
@@ -48,6 +84,7 @@ new #[Title('Pedidos')] class extends Component
             return;
         }
         unset($this->pending, $this->delivered);
+        OnlineOrder::notifyCustomer($id);
         $this->dispatch('pending-count', count: Order::pendingCount());
 
         $this->dispatch('toast', message: 'Entregado #'.$order->daily_number.($order->label ? ' '.$order->label : ''));
@@ -66,6 +103,7 @@ new #[Title('Pedidos')] class extends Component
             return;
         }
         unset($this->pending);
+        OnlineOrder::notifyCustomer($id);
         $this->dispatch('toast', message: '#'.$order->daily_number.' en camino');
     }
 
@@ -74,6 +112,7 @@ new #[Title('Pedidos')] class extends Component
         Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])->whereNotNull('delivered_at')
             ->update(['delivered_at' => null, 'version' => DB::raw('version + 1')]);
         unset($this->pending, $this->delivered);
+        OnlineOrder::notifyCustomer($id);
         $this->dispatch('pending-count', count: Order::pendingCount());
     }
 
@@ -87,13 +126,15 @@ new #[Title('Pedidos')] class extends Component
             return;
         }
         unset($this->pending, $this->stale);
+        OnlineOrder::notifyCustomer($id);
         $this->dispatch('toast', message: 'Pedido cancelado');
         $this->dispatch('pending-count', count: Order::pendingCount());
     }
 };
 ?>
 
-<div wire:poll.15s.visible x-data="{ now: Date.now() }" x-init="setInterval(() => now = Date.now(), 30000)">
+<div wire:poll.15s.visible x-data="{ now: Date.now(), rejecting: null, reason: '' }" x-init="setInterval(() => now = Date.now(), 30000)"
+     @online-order.window="$wire.$refresh()">
     <x-page-header title="Pedidos" tour="pedidos">
         <x-slot:actions>
             {{-- En el celular solo el ícono: con el texto, el título se cortaba a "P...". --}}
@@ -103,12 +144,90 @@ new #[Title('Pedidos')] class extends Component
     </x-page-header>
 
     <div class="space-y-6">
-        @if ($this->pending->isEmpty())
+        @if ($this->requested->isNotEmpty())
+            <section class="space-y-3" aria-label="Pedidos en línea por aceptar" data-tour="pedidos-en-linea">
+                <h2 class="section-title flex items-center gap-2 px-1">
+                    <span class="num grid h-7 min-w-7 place-items-center rounded-full bg-chile px-2 text-base text-white">{{ $this->requested->count() }}</span>
+                    {{ $this->requested->count() === 1 ? 'Pedido en línea por aceptar' : 'Pedidos en línea por aceptar' }}
+                </h2>
+                <ul class="grid gap-3 lg:grid-cols-2">
+                    @foreach ($this->requested as $order)
+                        @php $waiting = $order->created_at->getTimestampMs(); @endphp
+                        <li wire:key="pr-{{ $order->id }}" class="card flex flex-col !p-0 ring-2 ring-chile/60">
+                            <div class="flex items-start gap-3 px-4 pt-4">
+                                <span class="grid size-12 shrink-0 place-items-center rounded-xl bg-chile text-white"><x-icon name="store" class="size-6" /></span>
+                                <div class="min-w-0 flex-1">
+                                    <p class="truncate font-display text-[1.5rem] leading-tight font-bold">{{ $order->label }}</p>
+                                    <p class="mt-0.5 flex flex-wrap items-center gap-2 text-sm">
+                                        <span class="badge bg-limon-soft text-ink">En línea</span>
+                                        <span @class(['badge', 'bg-naranja text-on-limon' => $order->isDelivery(), 'bg-sunken text-ink' => ! $order->isDelivery()])>{{ $order->isDelivery() ? 'A domicilio' : 'Pasa a recoger' }}</span>
+                                        <span class="flex items-center gap-1" :class="(now - {{ $waiting }}) > 5 * 60000 ? 'font-semibold text-chile' : 'text-muted'">
+                                            <x-icon name="clock" class="size-3.5" />
+                                            <span x-text="(() => { const m = Math.max(0, Math.floor((now - {{ $waiting }}) / 60000)); return m < 1 ? 'recién' : (m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.floor(m / 60) + ' h') })()"></span>
+                                        </span>
+                                    </p>
+                                </div>
+                                <span class="num text-[1.5rem] font-bold">{{ money($order->total) }}</span>
+                            </div>
+
+                            <div class="mx-4 mt-3 space-y-2 rounded-xl bg-naranja-soft/70 px-3 py-2.5">
+                                @if ($order->isDelivery())
+                                    <p class="text-[15px] leading-snug font-semibold">{{ $order->delivery_address }}</p>
+                                    @if ($order->delivery_notes) <p class="text-sm text-muted">{{ $order->delivery_notes }}</p> @endif
+                                @endif
+                                <p class="text-sm text-muted">Teléfono: <span class="font-semibold text-ink">{{ $order->customer_phone }}</span></p>
+                                @if ($order->notes) <p class="text-sm text-muted">Nota: <span class="text-ink">{{ $order->notes }}</span></p> @endif
+                                <div class="flex flex-wrap gap-2">
+                                    <a href="tel:{{ $order->customer_phone }}" class="btn !min-h-9 !px-3"><x-icon name="phone" class="size-4" /> Llamar</a>
+                                    @if ($order->whatsappNumber())
+                                        <a href="https://wa.me/{{ $order->whatsappNumber() }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="chat" class="size-4" /> WhatsApp</a>
+                                    @endif
+                                </div>
+                            </div>
+
+                            <ul class="mt-3 flex-1 space-y-2 border-t border-line px-4 py-3">
+                                @foreach ($order->items as $item)
+                                    <li class="flex gap-3">
+                                        <span class="num w-7 shrink-0 text-2xl leading-none">{{ $item->quantity }}</span>
+                                        <span class="min-w-0">
+                                            <span class="block text-[17px] leading-tight font-semibold">{{ $item->product_name }}</span>
+                                            @if ($item->modifiers || $item->notes)
+                                                <span class="mt-1 flex flex-wrap gap-1">
+                                                    @foreach ($item->choices() as $choice)
+                                                        <span class="badge bg-limon text-on-limon !text-[13px]">{{ $choice['name'] }}</span>
+                                                    @endforeach
+                                                    @foreach ($item->withoutNames() as $name)
+                                                        <span class="badge bg-chile text-white !text-[13px]">Sin {{ mb_strtolower($name) }}</span>
+                                                    @endforeach
+                                                    @foreach ($item->extras() as $extra)
+                                                        <span class="badge bg-salsa text-on-salsa !text-[13px]">+ {{ $extra['name'] }}</span>
+                                                    @endforeach
+                                                    @if ($item->notes)
+                                                        <span class="text-sm text-ink italic">"{{ $item->notes }}"</span>
+                                                    @endif
+                                                </span>
+                                            @endif
+                                        </span>
+                                    </li>
+                                @endforeach
+                            </ul>
+
+                            <div class="flex gap-2 border-t border-line p-3">
+                                <button type="button" class="btn flex-1" @click="rejecting = { id: {{ $order->id }}, name: @js($order->label) }; reason = ''">Rechazar</button>
+                                <button type="button" wire:click="accept({{ $order->id }})" wire:loading.attr="disabled" wire:target="accept" class="btn-primary flex-1 !border-salsa !bg-salsa !text-on-salsa"><x-icon name="check" class="size-4" /> Aceptar</button>
+                            </div>
+                        </li>
+                    @endforeach
+                </ul>
+            </section>
+        @endif
+
+        @if ($this->pending->isEmpty() && $this->requested->isEmpty())
             <x-empty icon="orders" title="No hay pedidos pendientes" data-tour="pedidos-vacio">
                 Aquí aparecen los pedidos por entregar y los que guardaste sin cobrar, con su nombre e indicaciones.
                 <x-slot:action><a href="{{ route('vender') }}" wire:navigate class="btn-primary">Tomar un pedido</a></x-slot:action>
             </x-empty>
-        @else
+        @elseif ($this->pending->isNotEmpty())
             <ul class="grid gap-3 lg:grid-cols-2">
                 @foreach ($this->pending as $order)
                     @php
@@ -128,6 +247,9 @@ new #[Title('Pedidos')] class extends Component
                                         <span class="badge bg-limon-soft text-ink">Por cobrar</span>
                                     @else
                                         <span class="badge bg-salsa-soft text-salsa">Pagado</span>
+                                    @endif
+                                    @if ($order->isOnline())
+                                        <span class="badge bg-limon-soft text-ink">En línea</span>
                                     @endif
                                     @if ($order->serviceLabel() && ($order->label || $order->isDelivery()))
                                         <span @class(['badge', 'bg-naranja text-on-limon' => $order->isDelivery(), 'bg-sunken text-ink' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
@@ -172,6 +294,16 @@ new #[Title('Pedidos')] class extends Component
                                     @endif
                                     <a href="https://www.google.com/maps/search/?api=1&query={{ urlencode($order->delivery_address) }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="pin" class="size-4" /> Mapa</a>
                                 </div>
+                            </div>
+                        @endif
+
+                        @if ($order->isOnline() && ! $order->isDelivery() && $order->customer_phone)
+                            <div class="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-sunken px-3 py-2.5">
+                                <span class="text-sm text-muted">Teléfono: <span class="font-semibold text-ink">{{ $order->customer_phone }}</span></span>
+                                <a href="tel:{{ $order->customer_phone }}" class="btn !min-h-9 !px-3"><x-icon name="phone" class="size-4" /> Llamar</a>
+                                @if ($order->whatsappNumber())
+                                    <a href="https://wa.me/{{ $order->whatsappNumber() }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="chat" class="size-4" /> WhatsApp</a>
+                                @endif
                             </div>
                         @endif
 
@@ -283,4 +415,23 @@ new #[Title('Pedidos')] class extends Component
             </section>
         @endif
     </div>
+
+    {{-- Rechazar un pedido en línea: el cliente ve el motivo en su página. --}}
+    <x-sheet title="Rechazar pedido" open="rejecting !== null" dismiss="rejecting = null">
+        <div class="space-y-4" x-show="rejecting" x-cloak>
+            <p class="text-[15px]">Pedido de <span class="font-semibold" x-text="rejecting?.name"></span>. El cliente verá el motivo en su página.</p>
+            <div class="flex flex-wrap gap-2">
+                @foreach (\App\Support\OnlineOrder::REJECT_REASONS as $option)
+                    <button type="button" class="chip" :aria-pressed="reason === @js($option)" @click="reason = @js($option)">{{ $option }}</button>
+                @endforeach
+            </div>
+            <div>
+                <label class="label" for="reject-reason">Otro motivo (opcional)</label>
+                <input id="reject-reason" type="text" x-model="reason" maxlength="120" class="input" placeholder="Escribe un motivo">
+            </div>
+        </div>
+        <x-slot:footer>
+            <button type="button" class="btn-primary btn-lg w-full" @click="$wire.reject(rejecting.id, reason); rejecting = null">Rechazar pedido</button>
+        </x-slot:footer>
+    </x-sheet>
 </div>

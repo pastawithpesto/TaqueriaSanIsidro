@@ -27,6 +27,7 @@
     {{-- La app ya trae modo oscuro: evita que Chrome o Samsung Internet en Android la oscurezcan por su cuenta. --}}
     <meta name="color-scheme" content="light dark">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <x-realtime />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd34d">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#231c17">
     <meta name="mobile-web-app-capable" content="yes">
@@ -41,7 +42,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-dvh antialiased" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-pending="{{ $pendingCount }}" data-pending-url="{{ route('pedidos.pending') }}" data-tour-url="{{ route('tutorial.done') }}">
+<body class="min-h-dvh antialiased" data-realtime-admin data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-pending="{{ $pendingCount }}" data-pending-url="{{ route('pedidos.pending') }}" data-tour-url="{{ route('tutorial.done') }}">
     <div id="busy" aria-hidden="true"></div>
 
     <div class="md:grid md:min-h-dvh md:grid-cols-[15.5rem_1fr]">

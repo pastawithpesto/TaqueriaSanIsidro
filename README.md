@@ -67,6 +67,16 @@ docker cp taqueria-backup:/backups/taqueria-2026-10-15.dump .
 docker exec -i taqueria-db pg_restore -U taqueria -d taqueria --clean --if-exists < taqueria-2026-10-15.dump
 ```
 
+## Tiempo real
+
+Docker levanta `reverb` en el puerto interno 8080; solo desarrollo lo publica en `127.0.0.1:8080`. Laravel publica con `BROADCAST_CONNECTION=reverb`, `REVERB_HOST=reverb`, `REVERB_PORT=8080` y `REVERB_SCHEME=http`. Si corres PHP fuera de Docker, usa `REVERB_HOST=localhost`; Compose fija `reverb` dentro de los contenedores. El servidor escucha con `REVERB_SERVER_HOST=0.0.0.0` y `REVERB_SERVER_PORT=8080`.
+
+En desarrollo, `.env.example` incluye credenciales locales. En Portainer son obligatorias `REVERB_APP_ID`, `REVERB_APP_KEY` y `REVERB_APP_SECRET`; usa valores propios (por ejemplo, `taqueria` como ID y `openssl rand -hex 32` para cada clave). La app y Reverb comparten estas variables. Solo el contenedor PHP-FPM corre migraciones y optimiza cachés al arrancar.
+
+El navegador recibe la clave pública mediante `<x-realtime />` y usa el mismo dominio y puerto que la página, sin variables `VITE_REVERB_*` ni reconstruir assets al cambiar las credenciales. Nginx reenvía `/app` y `/apps` al servicio interno. En Nginx Proxy Manager activa **Websockets Support** y HTTPS; `/broadcasting/auth` permanece en Laravel, protegido por sesión y `auth`, independientemente de `ADMIN_PATH`.
+
+Si Reverb está caído, la app sigue funcionando y los pedidos se guardan; las pantallas se actualizan por consulta periódica. Al reconectar se consulta de nuevo el contador. El aviso sonoro requiere que el usuario haya tocado la pantalla y respeta el silencio de cocina.
+
 ## Rutas
 
 La raíz del dominio es para los clientes (`/`). El sistema del taquero (vender, pedidos, cocina, gastos, ajustes) vive bajo `ADMIN_PATH`, por defecto `/admon`: `https://taqueria.revmnds.com/admon`. Se cambia con la variable `ADMIN_PATH` (minúsculas, números y guiones). Si se cambia, hay que volver a instalar la app en el celular, porque su dirección de inicio es esa ruta.

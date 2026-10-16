@@ -12,6 +12,7 @@ Route::get('/brand/logo-{size}.png', [BrandingController::class, 'logo'])->where
 
 // La raíz es para los clientes; el sistema del taquero vive bajo ADMIN_PATH (por defecto /admon).
 Route::livewire('/', 'pages::pedir')->name('pedir');
+Route::livewire('/pedido/{token}', 'pages::pedido')->whereUuid('token')->name('pedido');
 
 Route::prefix(config('app.admin_path'))->group(function () {
     Route::get('/manifest.webmanifest', [BrandingController::class, 'manifest'])->name('manifest');

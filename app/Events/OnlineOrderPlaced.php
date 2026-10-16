@@ -6,10 +6,11 @@ use App\Models\Order;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /** Un cliente mandó un pedido: avisa al taquero para que suene y aparezca en Por aceptar. */
-class OnlineOrderPlaced implements ShouldBroadcastNow
+class OnlineOrderPlaced implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 {
     use Dispatchable;
     use InteractsWithSockets;

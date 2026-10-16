@@ -10,7 +10,7 @@
 #   - Compose path:    compose.prod.yaml
 #   - Authentication:  token de GitHub (el repo es privado)
 #
-# Variables obligatorias: APP_KEY, APP_URL, DB_PASSWORD.
+# Variables obligatorias: APP_KEY, APP_URL, DB_PASSWORD, REVERB_APP_ID, REVERB_APP_KEY, REVERB_APP_SECRET.
 # Nginx Proxy Manager publica el dominio con https y reenvía a taqueria-web, puerto 80.
 # ============================================
 
@@ -25,7 +25,7 @@ services:
       target: app
     image: taqueria-app:latest
     restart: unless-stopped
-    environment:
+    environment: &app-environment
       APP_NAME: "Taquería San Isidro"
       APP_ENV: production
       APP_DEBUG: "false"
@@ -48,11 +48,33 @@ services:
       SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-true}
       CACHE_STORE: database
       QUEUE_CONNECTION: database
+      BROADCAST_CONNECTION: reverb
+      REVERB_APP_ID: ${REVERB_APP_ID:?Falta REVERB_APP_ID}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:?Falta REVERB_APP_KEY}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:?Falta REVERB_APP_SECRET}
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+      REVERB_SERVER_HOST: 0.0.0.0
+      REVERB_SERVER_PORT: 8080
       MAIL_MAILER: log
       # Detrás de Nginx Proxy Manager: confía en sus encabezados para generar URLs https.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
     volumes:
       # Logo subido, archivos temporales y vistas compiladas.
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - taqueria
+
+  reverb:
+    image: taqueria-app:latest
+    restart: unless-stopped
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    environment: *app-environment
+    volumes:
       - storage:/var/www/html/storage
     depends_on:
       db:

@@ -3,6 +3,7 @@
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
+use App\Support\OnlineOrder;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -73,6 +74,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
             return;
         }
         unset($this->queue, $this->ready);
+        OnlineOrder::notifyCustomer($id);
         $this->dispatch('toast', message: '#'.$order->daily_number.' listo');
     }
 
@@ -82,6 +84,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
             ->whereNotNull('ready_at')->whereNull('dispatched_at')->whereNull('delivered_at')
             ->update(['ready_at' => null, 'version' => DB::raw('version + 1')]);
         unset($this->queue, $this->ready);
+        OnlineOrder::notifyCustomer($id);
     }
 };
 ?>

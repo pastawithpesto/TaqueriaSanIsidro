@@ -153,10 +153,6 @@ class OnlineOrder
             return $locked;
         }));
 
-        if ($accepted) {
-            self::broadcast(new OnlineOrderUpdated($accepted));
-        }
-
         return (bool) $accepted;
     }
 
@@ -188,11 +184,17 @@ class OnlineOrder
             return $locked;
         });
 
-        if ($changed) {
-            self::broadcast(new OnlineOrderUpdated($changed));
-        }
-
         return (bool) $changed;
+    }
+
+    /** Avisa a la página del cliente que su pedido cambió (para los cambios que se hacen con consultas directas). */
+    public static function notifyCustomer(int $id): void
+    {
+        $order = Order::find($id);
+
+        if ($order?->isOnline() && $order->public_token) {
+            self::broadcast(new OnlineOrderUpdated($order));
+        }
     }
 
     /** Avisa a las pantallas abiertas. Si el servidor de tiempo real no responde, el pedido no se pierde. */

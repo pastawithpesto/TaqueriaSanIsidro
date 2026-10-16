@@ -4,7 +4,9 @@ namespace App\Models;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
+use App\Events\OnlineOrderUpdated;
 use App\Support\BusinessDay;
+use App\Support\OnlineOrder;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,6 +23,13 @@ class Order extends Model
     {
         static::updating(function (Order $order) {
             $order->version = (int) $order->getOriginal('version') + 1;
+        });
+
+        // Si cambia algo que el cliente ve en su página (aceptado, listo, en camino, entregado, cancelado), se le avisa.
+        static::updated(function (Order $order) {
+            if ($order->source === 'online' && $order->public_token && $order->wasChanged(['status', 'accepted_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at'])) {
+                OnlineOrder::broadcast(new OnlineOrderUpdated($order));
+            }
         });
     }
 
@@ -160,7 +169,7 @@ class Order extends Model
     /** Número para WhatsApp: 10 dígitos de México se completan con 52. */
     public function whatsappNumber(): ?string
     {
-        $digits = preg_replace('/\D/', '', (string) $this->delivery_phone);
+        $digits = preg_replace('/\D/', '', (string) ($this->delivery_phone ?: $this->customer_phone));
 
         return match (true) {
             strlen($digits) === 10 => '52'.$digits,

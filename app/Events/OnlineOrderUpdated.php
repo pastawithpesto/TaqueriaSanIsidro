@@ -6,10 +6,11 @@ use App\Models\Order;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /** El pedido de un cliente cambió (aceptado, rechazado, listo, en camino, entregado): su página de seguimiento se actualiza. */
-class OnlineOrderUpdated implements ShouldBroadcastNow
+class OnlineOrderUpdated implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 {
     use Dispatchable;
     use InteractsWithSockets;
@@ -27,9 +28,9 @@ class OnlineOrderUpdated implements ShouldBroadcastNow
         return 'updated';
     }
 
-    /** @return array{status: string} */
+    /** Solo avisa que algo cambió, sin datos del pedido: la página lo vuelve a leer. */
     public function broadcastWith(): array
     {
-        return ['status' => (string) $this->order->version];
+        return ['version' => (int) $this->order->version];
     }
 }

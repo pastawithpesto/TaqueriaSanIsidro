@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="dark">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <x-realtime />
     <meta name="theme-color" content="#191411">
     <link rel="icon" href="{{ Branding::logoUrl(64) }}" type="image/png">
     <title>{{ isset($title) ? $title.' | '.Branding::name() : Branding::name() }}</title>
@@ -13,7 +14,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-dvh antialiased" style="background: #191411; color: #f7efe5; color-scheme: dark" data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-tour-url="{{ route('tutorial.done') }}">
+<body class="min-h-dvh antialiased" style="background: #191411; color: #f7efe5; color-scheme: dark" data-realtime-admin data-realtime-kitchen data-business="{{ Branding::name() }}" data-tours-seen="{{ json_encode(auth()->user()->seen_tours ?? []) }}" data-pending="{{ \App\Models\Order::pendingCount() }}" data-pending-url="{{ route('pedidos.pending') }}" data-tour-url="{{ route('tutorial.done') }}">
     <div id="busy" aria-hidden="true"></div>
     {{ $slot }}
 

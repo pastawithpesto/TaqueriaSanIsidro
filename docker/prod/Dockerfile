@@ -31,6 +31,7 @@ RUN apt-get update \
 COPY docker/php/app.ini "$PHP_INI_DIR/conf.d/zz-app.ini"
 COPY docker/prod/opcache.ini "$PHP_INI_DIR/conf.d/zz-opcache.ini"
 COPY docker/prod/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /var/www/html
 COPY --chown=www-data:www-data . .

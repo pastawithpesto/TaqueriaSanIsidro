@@ -1,5 +1,6 @@
 services:
   app:
+    image: taqueria-app:dev
     build:
       context: .
       dockerfile: docker/php/Dockerfile
@@ -11,6 +12,32 @@ services:
     environment:
       DB_HOST: db
       RUN_MIGRATIONS: "true"
+      BROADCAST_CONNECTION: reverb
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+    depends_on:
+      db:
+        condition: service_healthy
+
+  reverb:
+    image: taqueria-app:dev
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    volumes:
+      - .:/var/www/html
+    environment:
+      DB_HOST: db
+      RUN_MIGRATIONS: "false"
+      BROADCAST_CONNECTION: reverb
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
     depends_on:
       db:
         condition: service_healthy
