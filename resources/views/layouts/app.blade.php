@@ -13,6 +13,7 @@
         ['corte', 'Corte de caja', 'banknote'],
         ['productos', 'Productos', 'tag'],
         ['insumos', 'Insumos', 'package'],
+        ['tienda', 'Tienda en línea', 'store'],
         ['ajustes', 'Ajustes', 'settings'],
     ];
     $moreActive = collect($more)->contains(fn ($l) => request()->routeIs($l[0]));

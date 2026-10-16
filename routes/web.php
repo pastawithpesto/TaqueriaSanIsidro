@@ -31,6 +31,7 @@ Route::prefix(config('app.admin_path'))->group(function () {
         Route::livewire('/gastos', 'pages::gastos')->name('gastos');
         Route::livewire('/productos', 'pages::productos')->name('productos');
         Route::livewire('/insumos', 'pages::insumos')->name('insumos');
+        Route::livewire('/tienda', 'pages::tienda')->name('tienda');
         Route::livewire('/ajustes', 'pages::ajustes')->name('ajustes');
 
         // Marca un recorrido como visto para no mostrarlo solo otra vez; "todas" apaga las explicaciones automáticas.
