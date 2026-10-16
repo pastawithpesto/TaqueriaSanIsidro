@@ -189,12 +189,12 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                         <div class="flex items-start gap-3 p-4 pb-3">
                             <span class="num grid size-14 shrink-0 place-items-center rounded-2xl bg-[#ffc233] text-3xl font-bold text-[#33200f]">{{ $order->daily_number }}</span>
                             <div class="min-w-0 flex-1">
-                                <p class="truncate font-display text-3xl leading-tight font-bold">{{ $order->label ?: 'Sin nombre' }}</p>
+                                <p class="truncate font-display text-3xl leading-tight font-bold">{{ $order->label ?: ($order->serviceLabel() ?? 'Pedido') }}</p>
                                 <p class="mt-1 flex flex-wrap items-center gap-2 text-base">
                                     @if ($changedRecently)
                                         <span class="rounded-md bg-[#ffc233] px-2 py-0.5 font-bold text-[#33200f]">CAMBIÓ</span>
                                     @endif
-                                    @if ($order->serviceLabel())
+                                    @if ($order->serviceLabel() && ($order->label || $order->isDelivery()))
                                         <span @class(['rounded-md px-2 py-0.5 font-semibold', 'bg-[#f08a3c] text-[#33200f]' => $order->isDelivery(), 'bg-white/12' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
                                     @endif
                                     @if ($pickup)

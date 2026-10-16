@@ -98,14 +98,15 @@ new #[Title('Pedidos')] class extends Component
                         <div class="flex items-start gap-3 px-4 pt-4">
                             <span class="num grid size-12 shrink-0 place-items-center rounded-xl bg-limon text-2xl font-bold text-on-limon">{{ $order->daily_number }}</span>
                             <div class="min-w-0 flex-1">
-                                <p class="truncate font-display text-[1.5rem] leading-tight font-bold">{{ $order->label ?: 'Sin nombre' }}</p>
+                                {{-- Sin nombre, el título es el servicio (Aquí, Para llevar): "Sin nombre" en cada tarjeta solo hacía ruido. --}}
+                                <p class="truncate font-display text-[1.5rem] leading-tight font-bold">{{ $order->label ?: ($order->serviceLabel() ?? 'Pedido') }}</p>
                                 <p class="mt-0.5 flex flex-wrap items-center gap-2 text-sm">
                                     @if ($open)
                                         <span class="badge bg-limon-soft text-ink">Por cobrar</span>
                                     @else
                                         <span class="badge bg-salsa-soft text-salsa">Pagado</span>
                                     @endif
-                                    @if ($order->serviceLabel())
+                                    @if ($order->serviceLabel() && ($order->label || $order->isDelivery()))
                                         <span @class(['badge', 'bg-naranja text-on-limon' => $order->isDelivery(), 'bg-sunken text-ink' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
                                     @endif
                                     @if ($order->dispatched_at && ! $delivered)
