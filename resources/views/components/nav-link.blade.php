@@ -1,6 +1,7 @@
 @props(['route', 'icon', 'pending' => false])
 @php $active = request()->routeIs($route); @endphp
-<a href="{{ route($route) }}" wire:navigate.hover {{ $attributes }}
+{{-- Sin .hover: la página que se carga al pasar el mouse se guarda 30 s y puede llegar sin el pedido recién guardado. --}}
+<a href="{{ route($route) }}" wire:navigate {{ $attributes }}
    @class([
        'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium',
        'bg-limon text-on-limon' => $active,
