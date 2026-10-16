@@ -88,31 +88,29 @@ new #[Layout('layouts::public')] #[Title('Haz tu pedido')] class extends Compone
     $ordering = $store['canOrder'];
 @endphp
 
-<div x-data="orderPage(@js($this->catalog), @js($store))" class="mx-auto min-h-dvh max-w-2xl pb-32">
+<div x-data="orderPage(@js($this->catalog), @js($store))" class="min-h-dvh pb-32">
     {{-- Encabezado --}}
-    <header class="bg-brand rounded-b-3xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5 shadow-[0_6px_20px_-12px_rgb(78_44_17/0.45)]">
-        <div class="flex items-center gap-4">
-            <x-logo class="size-16 shrink-0 shadow-lg ring-2 ring-white/80" :res="192" />
-            <div class="min-w-0">
-                <h1 class="font-display text-[1.75rem] leading-[1.02] text-balance">{{ Branding::name() }}</h1>
-                <p class="mt-1 flex items-center gap-2 text-sm font-semibold">
-                    <span @class(['size-2.5 rounded-full', 'bg-salsa' => $store['open'], 'bg-chile' => ! $store['open']])></span>
-                    @if ($store['open'])
-                        Abierto{{ $store['closesAt'] ? ' hasta las '.$store['closesAt'] : '' }}
-                    @else
-                        Cerrado{{ $store['opensAt'] && $store['opensAt'] !== ' a las ' ? '. Abrimos el '.mb_strtolower($store['opensAt']) : '' }}
-                    @endif
-                </p>
-            </div>
-        </div>
+    <header class="bg-brand flex flex-col items-center rounded-b-3xl px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 text-center shadow-[0_6px_20px_-12px_rgb(78_44_17/0.45)]">
+        <x-logo class="size-40 shadow-xl ring-4 ring-white/80 sm:size-44" :res="512" />
+        <h1 class="mt-4 font-display text-[2.25rem] leading-[1] text-balance">{{ Branding::name() }}</h1>
+        <p class="mt-2 inline-flex items-center gap-2 rounded-full bg-white/70 px-3.5 py-1.5 text-sm font-semibold">
+            <span @class(['size-2.5 rounded-full', 'bg-salsa' => $store['open'], 'bg-chile' => ! $store['open']])></span>
+            @if ($store['open'])
+                Abierto{{ $store['closesAt'] ? ' hasta las '.$store['closesAt'] : '' }}
+            @else
+                Cerrado{{ $store['opensAt'] && $store['opensAt'] !== ' a las ' ? '. Abrimos el '.mb_strtolower($store['opensAt']) : '' }}
+            @endif
+        </p>
         <p class="mt-3 text-sm">{{ $store['schedule'] }}</p>
         @if ($store['phone'])
-            <div class="mt-3 flex flex-wrap gap-2">
+            <div class="mt-3 flex flex-wrap justify-center gap-2">
                 <a href="tel:{{ $store['phone'] }}" class="btn !min-h-9 !px-3"><x-icon name="phone" class="size-4" /> Llamar</a>
                 <a href="https://wa.me/52{{ $store['phone'] }}" target="_blank" rel="noopener" class="btn !min-h-9 !px-3"><x-icon name="chat" class="size-4" /> WhatsApp</a>
             </div>
         @endif
     </header>
+
+    <div class="mx-auto max-w-2xl">
 
     @if ($store['message'])
         <div role="status" class="mx-4 mt-4 flex gap-3 rounded-2xl bg-limon-soft p-4 text-[15px] font-semibold">
@@ -164,6 +162,7 @@ new #[Layout('layouts::public')] #[Title('Haz tu pedido')] class extends Compone
             </section>
         </template>
     </main>
+    </div>
 
     {{-- Barra del pedido --}}
     @if ($ordering)

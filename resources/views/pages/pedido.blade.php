@@ -85,14 +85,10 @@ new #[Layout('layouts::public')] #[Title('Tu pedido')] class extends Component
 <div class="mx-auto min-h-dvh max-w-xl pb-10" wire:poll.10s
      x-data="{ listen() { if (! window.Echo) return; window.Echo.channel('order.{{ $token }}').listen('.updated', () => $wire.$refresh()); } }"
      x-init="listen()">
-    <header class="bg-brand rounded-b-3xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5">
-        <div class="flex items-center gap-3">
-            <x-logo class="size-12 shrink-0 ring-2 ring-white/80" :res="192" />
-            <div class="min-w-0">
-                <p class="font-display text-xl leading-tight">{{ Branding::name() }}</p>
-                <p class="text-sm">Pedido de {{ $order->label }}</p>
-            </div>
-        </div>
+    <header class="bg-brand flex flex-col items-center rounded-b-3xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5 text-center">
+        <x-logo class="size-28 shadow-lg ring-4 ring-white/80" :res="512" />
+        <p class="mt-3 font-display text-[1.75rem] leading-tight">{{ Branding::name() }}</p>
+        <p class="text-sm">Pedido de {{ $order->label }}</p>
     </header>
 
     <main class="space-y-5 px-4 pt-5">
