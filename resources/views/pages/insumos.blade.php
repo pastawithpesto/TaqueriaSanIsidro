@@ -460,6 +460,10 @@ new #[Title('Insumos')] class extends Component
                             get same() { return ! this.use || this.use === $wire.unit },
                             get known() { return this.same ? null : (this.conversions[$wire.unit]?.[this.use] ?? null) },
                             get per() { return this.known ?? Number($wire.use_per_unit) },
+                            get perLabel() {
+                                const verb = ['g', 'kg'].includes(this.use) ? ' pesa' : (['ml', 'lt'].includes(this.use) ? ' trae' : ' rinde');
+                                return 'Cada ' + $wire.unit + verb;
+                            },
                             money(n) {
                                 const whole = Math.abs(n % 1) < 0.005;
                                 return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(n);
@@ -484,7 +488,7 @@ new #[Title('Insumos')] class extends Component
                             @error('use_unit') <p class="error">{{ $message }}</p> @enderror
                         </div>
                         <div x-show="! same && known === null" x-cloak>
-                            <label class="label" for="use-per-unit" x-text="'Cada ' + $wire.unit + ' rinde'"></label>
+                            <label class="label" for="use-per-unit" x-text="perLabel"></label>
                             <div class="relative">
                                 <input id="use-per-unit" type="number" inputmode="decimal" step="any" min="0" wire:model="use_per_unit" class="input pr-24">
                                 <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm text-muted" x-text="unitLabel(use, 2)"></span>
@@ -494,7 +498,7 @@ new #[Title('Insumos')] class extends Component
                         <p x-show="known !== null" x-cloak class="self-end pb-3 text-[15px]" x-text="'1 ' + $wire.unit + ' son ' + known + ' ' + use + '.'"></p>
                     </div>
                     <p class="font-semibold" x-show="costText" x-cloak x-text="costText"></p>
-                    <p class="hint" x-show="! same && known === null" x-cloak>Si no sabes cuántas salen, calcula. Lo corriges cuando veas cuánto te dura.</p>
+                    <p class="hint" x-show="! same && known === null" x-cloak x-text="'Aquí va lo de 1 ' + $wire.unit + ', no lo de un taco: eso se pone en la receta. Si no lo sabes exacto, calcula; lo corriges cuando veas cuánto te dura.'"></p>
                 </section>
                 @if ($inUse)
                     <p class="hint">Ya se usa en recetas o compras. Si cambias cómo se compra o se usa, las cantidades se convierten solas.</p>
