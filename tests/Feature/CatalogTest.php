@@ -396,4 +396,63 @@ class CatalogTest extends TestCase
 
         $this->assertSame(1, Product::count());
     }
+
+    public function test_selling_an_ingredient_by_the_kilo_asks_how_much_each_sale_uses(): void
+    {
+        $avocado = Ingredient::create(['name' => 'Aguacate', 'unit' => 'kg', 'cost_per_unit' => 80]);
+
+        Livewire::test('pages::insumos')
+            ->call('startSelling', $avocado->id)
+            ->assertSet('sellQuantity', '')
+            ->set('sellPrice', '25')
+            ->call('sell')
+            ->assertHasErrors('sellQuantity');
+
+        $this->assertSame(0, Product::count());
+    }
+
+    public function test_selling_an_ingredient_already_sold_opens_that_product_to_change_it(): void
+    {
+        $cheese = Ingredient::create(['name' => 'Queso entero', 'unit' => 'kg', 'cost_per_unit' => 35]);
+        $product = Product::create(['name' => 'Queso entero', 'category' => 'Otros', 'price' => 40]);
+        $product->ingredients()->attach($cheese, ['quantity' => 1]);
+
+        Livewire::test('pages::insumos')
+            ->call('startSelling', $cheese->id)
+            ->assertSee('Ya se vende como')
+            ->assertSet('sellProductId', $product->id)
+            ->assertSet('sellPrice', '40')
+            ->assertSet('sellQuantity', '1')
+            ->set('sellPrice', '45')
+            ->set('sellQuantity', '0.5')
+            ->call('sell')
+            ->assertHasNoErrors();
+
+        $product->refresh()->load('ingredients');
+        $this->assertSame('45.00', $product->price);
+        $this->assertEquals(0.5, $product->ingredients->first()->pivot->quantity);
+        $this->assertSame(1, Product::count());
+    }
+
+    public function test_selling_an_ingredient_already_sold_can_add_another_product(): void
+    {
+        $cheese = Ingredient::create(['name' => 'Queso entero', 'unit' => 'kg', 'cost_per_unit' => 35]);
+        $product = Product::create(['name' => 'Queso entero', 'category' => 'Otros', 'price' => 40]);
+        $product->ingredients()->attach($cheese, ['quantity' => 1]);
+
+        Livewire::test('pages::insumos')
+            ->call('startSelling', $cheese->id)
+            ->call('pickSellProduct', null)
+            ->assertSet('sellName', '')
+            ->assertSet('sellPrice', null)
+            ->assertSet('sellCategory', 'Otros')
+            ->set('sellName', 'Medio queso')
+            ->set('sellPrice', '22')
+            ->set('sellQuantity', '0.5')
+            ->call('sell')
+            ->assertHasNoErrors();
+
+        $this->assertSame(2, Product::count());
+        $this->assertSame('40.00', $product->fresh()->price);
+    }
 }

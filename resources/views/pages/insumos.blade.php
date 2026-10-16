@@ -38,6 +38,9 @@ new #[Title('Insumos')] class extends Component
 
     public ?int $sellId = null;
 
+    /** Producto que ya vende este insumo y se está editando; null para crear otro. */
+    public ?int $sellProductId = null;
+
     public string $sellName = '';
 
     public ?string $sellPrice = null;
@@ -77,27 +80,58 @@ new #[Title('Insumos')] class extends Component
         return Product::categories();
     }
 
+    /** Productos que ya venden este insumo tal cual (con él como único ingrediente): puede haber varios sabores. */
+    #[Computed]
+    public function soldAs()
+    {
+        return $this->sellId
+            ? Product::with('ingredients')->whereHas('ingredients', fn ($q) => $q->whereKey($this->sellId))->has('ingredients', '=', 1)->orderBy('name')->get()
+            : collect();
+    }
+
+    /** Si ya se vende, abre ese producto para cambiar su precio; si no, uno nuevo. */
     public function startSelling(int $id): void
     {
-        $ingredient = Ingredient::findOrFail($id);
+        $this->sellId = Ingredient::findOrFail($id)->id;
+        unset($this->sellIngredient, $this->soldAs);
+        $this->pickSellProduct($this->soldAs->first()?->id);
+        $this->showSell = true;
+    }
+
+    public function pickSellProduct(?int $productId): void
+    {
+        $ingredient = $this->sellIngredient;
+        $product = $productId ? $this->soldAs->firstWhere('id', $productId) : null;
+        $plain = fn (string $number) => rtrim(rtrim($number, '0'), '.');
 
         $this->resetErrorBag();
-        $this->sellId = $ingredient->id;
-        $this->sellName = $ingredient->name;
+        $this->sellProductId = $product?->id;
+
+        if ($product) {
+            $this->sellName = $product->name;
+            $this->sellPrice = $plain((string) $product->price);
+            $this->sellCategory = $product->category;
+            $this->sellQuantity = $plain((string) $product->ingredients->first()->pivot->quantity);
+
+            return;
+        }
+
+        $this->sellName = Product::where('name', $ingredient->name)->exists() ? '' : $ingredient->name;
         $this->sellPrice = null;
-        $this->sellCategory = null;
-        $this->sellQuantity = '1';
-        $this->showSell = true;
+        $this->sellCategory = $this->soldAs->first()?->category;
+        // Por pieza lo normal es una por venta; por kilo o litro hay que decir cuánto lleva cada una.
+        $this->sellQuantity = in_array($ingredient->unit, ['pza', 'paquete', 'caja'], true) ? '1' : '';
     }
 
     public function sell(): void
     {
         $ingredient = Ingredient::findOrFail($this->sellId);
+        $editing = $this->sellProductId ? $this->soldAs->firstWhere('id', $this->sellProductId) ?? abort(404) : null;
         $this->sellName = trim($this->sellName);
-        $this->sellCategory = Product::normalizeCategory($this->sellCategory);
+        $this->sellCategory = Product::normalizeCategory($this->sellCategory, $editing?->id);
 
         $this->validate([
-            'sellName' => ['required', 'string', 'max:255', Rule::unique('products', 'name')],
+            'sellName' => ['required', 'string', 'max:255', Rule::unique('products', 'name')->ignore($editing?->id)],
             'sellPrice' => ['required', 'numeric', 'gt:0', 'max:99999'],
             'sellCategory' => ['nullable', 'string', 'max:40'],
             'sellQuantity' => ['required', 'numeric', 'gt:0', 'max:99999'],
@@ -105,21 +139,25 @@ new #[Title('Insumos')] class extends Component
             'sellName.unique' => 'Ya hay un producto con ese nombre.',
         ], ['sellName' => 'nombre', 'sellPrice' => 'precio', 'sellCategory' => 'categoría', 'sellQuantity' => 'cantidad']);
 
-        $product = DB::transaction(function () use ($ingredient) {
-            $product = Product::create([
-                'name' => $this->sellName,
-                'price' => $this->sellPrice,
-                'category' => $this->sellCategory,
-                'sort_order' => (int) Product::max('sort_order') + 1,
-            ]);
+        $product = DB::transaction(function () use ($ingredient, $editing) {
+            $fields = ['name' => $this->sellName, 'price' => $this->sellPrice, 'category' => $this->sellCategory];
+
+            if ($editing) {
+                $editing->update($fields);
+                $editing->ingredients()->updateExistingPivot($ingredient->id, ['quantity' => $this->sellQuantity]);
+
+                return $editing;
+            }
+
+            $product = Product::create($fields + ['sort_order' => (int) Product::max('sort_order') + 1]);
             $product->ingredients()->attach($ingredient->id, ['quantity' => $this->sellQuantity, 'removable' => false]);
 
             return $product;
         });
 
         $this->showSell = false;
-        unset($this->ingredients, $this->categories);
-        $this->dispatch('toast', message: $product->name.' ya aparece en Vender');
+        unset($this->ingredients, $this->categories, $this->soldAs);
+        $this->dispatch('toast', message: $editing ? $product->name.' guardado' : $product->name.' ya aparece en Vender');
     }
 
     public function create(): void
@@ -333,8 +371,39 @@ new #[Title('Insumos')] class extends Component
             </div>
             @if ($ingredient = $this->sellIngredient)
                 <form wire:submit="sell" id="sell-form" class="space-y-4" wire:loading.remove wire:target="startSelling"
-                      x-data="{ cost: {{ (float) $ingredient->cost_per_unit }} }">
-                    <p class="text-sm text-muted">Para lo que se vende como se compra, como refrescos o aguas. Aparece en Vender y su costo sale de {{ $ingredient->name }}, así ves cuánto ganas.</p>
+                      x-data="{
+                        cost: {{ (float) $ingredient->cost_per_unit }},
+                        money(n) {
+                            const whole = Math.abs(n % 1) < 0.005;
+                            return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(n);
+                        },
+                        get profitText() {
+                            const c = this.cost * (Number($wire.sellQuantity) || 0), p = Number($wire.sellPrice);
+                            if (! (p > 0) || ! (c > 0)) return '';
+                            return p >= c
+                                ? 'Te cuesta ' + this.money(c) + ' y ganas ' + this.money(p - c) + ' por cada uno.'
+                                : 'Ojo: te cuesta ' + this.money(c) + ', más de lo que lo cobras.';
+                        },
+                      }">
+                    @if ($this->soldAs->isEmpty())
+                        <p class="text-sm text-muted">Para lo que se vende como se compra, como refrescos o aguas. Aparece en Vender y su costo sale de {{ $ingredient->name }}, así ves cuánto ganas.</p>
+                    @else
+                        <div>
+                            <p class="label">Ya se vende como</p>
+                            <div class="flex flex-wrap gap-2">
+                                @foreach ($this->soldAs as $p)
+                                    <button type="button" wire:click="pickSellProduct({{ $p->id }})" wire:key="sold-{{ $p->id }}"
+                                            class="chip gap-1.5" aria-pressed="{{ $sellProductId === $p->id ? 'true' : 'false' }}">
+                                        {{ $p->name }} <span class="num font-normal">{{ money($p->price) }}</span>
+                                    </button>
+                                @endforeach
+                                <button type="button" wire:click="pickSellProduct(null)" class="chip gap-1.5" aria-pressed="{{ $sellProductId === null ? 'true' : 'false' }}">
+                                    <x-icon name="plus" class="size-4" /> Otro
+                                </button>
+                            </div>
+                            <p class="hint mt-2">{{ $sellProductId ? 'Aquí cambias su precio o cuánto lleva cada venta.' : 'Otro producto con el mismo insumo, por ejemplo de otro tamaño o sabor.' }}</p>
+                        </div>
+                    @endif
                     <div>
                         <label class="label" for="sell-name">Nombre en Vender</label>
                         <input id="sell-name" type="text" wire:model="sellName" class="input" maxlength="255">
@@ -355,17 +424,20 @@ new #[Title('Insumos')] class extends Component
                             @error('sellQuantity') <p class="error">{{ $message }}</p> @enderror
                         </div>
                     </div>
+                    @if ($example = ['kg' => 'Si vendes el kilo entero, cada venta usa 1; medio kilo, 0.5.', 'lt' => 'Si vendes el litro entero, cada venta usa 1; medio litro, 0.5.', 'g' => 'Un cuarto de kilo son 250 g.', 'ml' => 'Medio litro son 500 ml.'][$ingredient->unit] ?? null)
+                        <p class="hint -mt-2">{{ $example }}</p>
+                    @endif
                     <div>
                         <label class="label" for="sell-category">Categoría</label>
                         <x-combobox id="sell-category" bind="$wire.sellCategory" :options="$this->categories->all()" placeholder="Ej. Bebidas" create="Crear categoría" clear="Quitar categoría" maxlength="40" />
                         @error('sellCategory') <p class="error">{{ $message }}</p> @enderror
                     </div>
-                    <p class="hint" x-show="Number($wire.sellPrice) > 0" x-cloak
-                       x-text="(() => { const c = cost * (Number($wire.sellQuantity) || 0), p = Number($wire.sellPrice); return 'Te cuesta $' + c.toFixed(2).replace(/\.00$/, '') + ' y ganas $' + (p - c).toFixed(2).replace(/\.00$/, '') + ' por cada uno.' })()"></p>
+                    <p class="hint" x-show="profitText" x-cloak x-text="profitText"
+                       :class="profitText.startsWith('Ojo') && '!text-chile font-semibold'"></p>
                 </form>
             @endif
             <x-slot:footer>
-                <button type="submit" form="sell-form" wire:loading.attr="disabled" wire:target="sell,startSelling" class="btn-primary btn-lg w-full">Crear producto</button>
+                <button type="submit" form="sell-form" wire:loading.attr="disabled" wire:target="sell,startSelling,pickSellProduct" class="btn-primary btn-lg w-full">{{ $sellProductId ? 'Guardar cambios' : 'Crear producto' }}</button>
             </x-slot:footer>
         </x-sheet>
 
