@@ -367,6 +367,20 @@ class CatalogTest extends TestCase
         $this->assertEqualsWithDelta(5.4, $taco->extras()->sole()->cost(), 0.0001);
     }
 
+    public function test_a_custom_use_unit_must_be_a_word(): void
+    {
+        $butter = Ingredient::create(['name' => 'Mantequilla', 'unit' => 'bote', 'cost_per_unit' => 60]);
+
+        Livewire::test('pages::insumos')
+            ->call('edit', $butter->id)
+            ->set('use_unit', 'que es esto?')
+            ->set('use_per_unit', '50')
+            ->call('save')
+            ->assertHasErrors(['use_unit' => 'Escribe solo la unidad, como untada o taza.']);
+
+        $this->assertNull($butter->fresh()->use_unit);
+    }
+
     public function test_using_an_ingredient_in_another_unit_asks_how_many_it_yields(): void
     {
         $butter = Ingredient::create(['name' => 'Mantequilla', 'unit' => 'bote', 'cost_per_unit' => 60]);

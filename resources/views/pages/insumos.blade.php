@@ -217,9 +217,10 @@ new #[Title('Insumos')] class extends Component
             'name' => ['required', 'string', 'max:255'],
             'unit' => ['required', Rule::in(Ingredient::UNITS)],
             'cost_per_unit' => ['required', 'numeric', 'min:0', 'max:999999'],
-            'use_unit' => ['nullable', 'string', 'max:20'],
+            'use_unit' => ['nullable', 'string', 'max:20', 'regex:/^[\pL ]+$/u'],
             'use_per_unit' => ['nullable', 'required_with:use_unit', 'numeric', 'gt:0', 'max:999999'],
         ], [
+            'use_unit.regex' => 'Escribe solo la unidad, como untada o taza.',
             'use_per_unit.required_with' => 'Escribe cuántas rinde.',
         ], ['use_unit' => 'unidad', 'use_per_unit' => 'cantidad']);
 
@@ -451,12 +452,12 @@ new #[Title('Insumos')] class extends Component
                          }">
                     <div>
                         <h3 class="section-title">En las recetas</h3>
-                        <p class="text-sm text-muted">Si no lo usas como lo compras. El pan se compra por paquete y se usa por pza; la mayonesa, por bote y por cucharada.</p>
+                        <p class="text-sm text-muted">Si no lo usas como lo compras. El pan se compra por paquete y se usa por pza; la mayonesa, por bote y por cucharada. Si la unidad no está en la lista, escríbela.</p>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div :class="{ 'col-span-2': same }">
                             <label class="label" for="use-unit">Se usa por</label>
-                            <x-combobox id="use-unit" bind="$wire.use_unit" :options="$this->useUnits->all()" none="Como se compra" create="Usar" maxlength="20" />
+                            <x-combobox id="use-unit" bind="$wire.use_unit" :options="$this->useUnits->all()" none="Como se compra" create="Nueva unidad" maxlength="20" />
                             @error('use_unit') <p class="error">{{ $message }}</p> @enderror
                         </div>
                         <div x-show="! same && known === null" x-cloak>
