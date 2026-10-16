@@ -192,15 +192,19 @@ new #[Title('Corte de caja')] class extends Component
         return is_numeric($this->counted) ? round((float) $this->counted - $this->expected, 2) : null;
     }
 
-    /** Ventas cobradas y luego canceladas ese día (sin contar las que se corrigieron y se volvieron a cobrar). */
+    /**
+     * Ventas cobradas y luego canceladas ese día. Las que se corrigieron y se volvieron a cobrar no cuentan;
+     * una corrección que se dejó a medias sí, porque ese dinero ya no está en las ventas.
+     */
     #[Computed]
     public function cancelled()
     {
         return Order::where('status', OrderStatus::Cancelled)
             ->whereNotNull('paid_at')
-            ->where(fn ($q) => $q->whereNull('cancel_reason')->orWhere('cancel_reason', '!=', Order::CORRECTION))
             ->countedBetween(BusinessDay::start($this->day()), BusinessDay::end($this->day()))
-            ->get(['id', 'total']);
+            ->get()
+            ->reject(fn (Order $order) => $order->cancel_reason === Order::CORRECTION && $order->wasCorrected())
+            ->values();
     }
 
     /** Los cortes de antes del día que se está viendo. */

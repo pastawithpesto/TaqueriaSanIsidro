@@ -157,4 +157,16 @@ class CashCloseTest extends TestCase
             ->assertSet('cancelled', fn ($orders) => $orders->sum('total') == 999)
             ->assertSee('Se canceló 1 venta');
     }
+
+    public function test_close_lists_a_correction_left_unfinished_but_not_one_charged_again(): void
+    {
+        Order::where('status', 'cancelled')->update(['cancelled_at' => now()]);
+        $sale = ['status' => 'cancelled', 'payment_method' => 'cash', 'sold_at' => now(), 'paid_at' => now(), 'cancelled_at' => now(), 'cancel_reason' => Order::CORRECTION];
+        Order::create($sale + ['daily_number' => 7, 'total' => 40]);
+        Order::create($sale + ['daily_number' => 8, 'total' => 60]);
+        Order::create(['daily_number' => 8, 'status' => 'paid', 'payment_method' => 'cash', 'total' => 70, 'sold_at' => now(), 'paid_at' => now()]);
+
+        Livewire::test('pages::corte')
+            ->assertSet('cancelled', fn ($orders) => $orders->pluck('total')->map(fn ($t) => (float) $t)->sort()->values()->all() === [40.0, 999.0]);
+    }
 }
