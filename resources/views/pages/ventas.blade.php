@@ -356,7 +356,7 @@ new #[Title('Ventas')] class extends Component
                                     </div>
                                 @endif
                                 @if ($cost > 0 && ! $isCancelled)
-                                    <p class="flex justify-between border-t border-line pt-2 text-muted">Ganancia por receta <span class="num text-base font-bold text-salsa">{{ money((float) $order->total - $cost) }}</span></p>
+                                    <p class="flex justify-between border-t border-line pt-2 text-muted">Ganancia por receta <span @class(['num text-base font-bold', (float) $order->total >= $cost ? 'text-salsa' : 'text-chile'])>{{ money((float) $order->total - $cost) }}</span></p>
                                 @endif
                                 @if ($order->payment_reference)
                                     <p class="text-muted">Referencia: <span class="font-semibold text-ink">{{ $order->payment_reference }}</span></p>

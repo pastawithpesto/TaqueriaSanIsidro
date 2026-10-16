@@ -333,7 +333,7 @@ new #[Title('Resumen')] class extends Component
                 </div>
                 <div class="mx-5 flex items-center justify-between border-t border-line py-3">
                     <dt class="font-semibold">Ganancia por receta</dt>
-                    <dd @class(['num text-[1.75rem] leading-none font-bold', 'text-salsa' => $t['recipeProfit'] > 0])>{{ money(round($t['recipeProfit'])) }}</dd>
+                    <dd @class(['num text-[1.75rem] leading-none font-bold', 'text-salsa' => $t['recipeProfit'] > 0, 'text-chile' => $t['recipeProfit'] < 0])>{{ money(round($t['recipeProfit'])) }}</dd>
                 </div>
                 <div class="mt-1 flex items-center justify-between gap-4 bg-sunken/60 px-5 py-3">
                     <dt>
@@ -379,7 +379,7 @@ new #[Title('Resumen')] class extends Component
                                     <div class="mt-1 flex justify-between text-sm text-muted">
                                         <span>{{ (int) $row->qty }} {{ (int) $row->qty === 1 ? 'vendido' : 'vendidos' }}</span>
                                         @if ((float) $row->cost > 0)
-                                            <span>ganancia <span class="font-semibold text-salsa">{{ money(round($profit)) }}</span></span>
+                                            <span>ganancia <span @class(['font-semibold', $profit >= 0 ? 'text-salsa' : 'text-chile'])>{{ money(round($profit)) }}</span></span>
                                         @else
                                             <span>sin receta</span>
                                         @endif
