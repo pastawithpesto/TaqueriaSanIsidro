@@ -103,14 +103,38 @@ new #[Title('Resumen')] class extends Component
     #[Computed]
     public function topProducts(): Collection
     {
-        return $this->paidItems($this->from, $this->to)
-            ->select('order_items.product_name')
-            ->selectRaw('SUM(order_items.quantity) as qty')
-            ->selectRaw('SUM(order_items.subtotal) as revenue')
-            ->selectRaw('SUM(order_items.quantity * order_items.unit_cost) as cost')
-            ->groupBy('order_items.product_name')
-            ->orderByDesc('qty')
-            ->get();
+        $rows = collect();
+        foreach ($this->paidOrders($this->from, $this->to)->with('items')->get() as $order) {
+            $items = $order->items->sortBy('id')->values();
+            $weights = $items->map(fn ($item) => max(0, (int) round((float) $item->subtotal * 100)));
+            if ($weights->sum() === 0) {
+                $weights = $items->pluck('quantity');
+            }
+            $weightTotal = $weights->sum();
+            $target = (int) round((float) $order->total * 100);
+            $runningWeight = 0;
+            $allocated = 0;
+            foreach ($items as $index => $item) {
+                $runningWeight += $weights[$index];
+                // Redondear el acumulado conserva cada centavo, también con cortesías y descuentos totales.
+                // El ingreso incluye la parte proporcional del empaque y el envío, para cuadrar con la orden.
+                $next = $weightTotal > 0 ? (int) round($target * ($runningWeight / $weightTotal)) : 0;
+                $rows->push((object) [
+                    'product_name' => $item->product_name,
+                    'qty' => $item->quantity,
+                    'revenue_cents' => $next - $allocated,
+                    'cost' => $item->quantity * (float) $item->unit_cost,
+                ]);
+                $allocated = $next;
+            }
+        }
+
+        return $rows->groupBy('product_name')->map(fn ($items, $name) => (object) [
+            'product_name' => $name,
+            'qty' => $items->sum('qty'),
+            'revenue' => $items->sum('revenue_cents') / 100,
+            'cost' => $items->sum('cost'),
+        ])->sortByDesc('qty')->values();
     }
 
     #[Computed]
@@ -146,8 +170,8 @@ new #[Title('Resumen')] class extends Component
         // Las horas se acomodan desde que empieza el día de trabajo: de 6 pm a 2 am quedan seguidas.
         $endHour = BusinessDay::endHour();
         $byHour = $this->paidOrders($this->from, $this->to)
-            ->get(['sold_at', 'total'])
-            ->groupBy(fn ($o) => ($o->sold_at->hour - $endHour + 24) % 24)
+            ->get(['sold_at', 'paid_at', 'total'])
+            ->groupBy(fn ($o) => ($o->countedAt()->hour - $endHour + 24) % 24)
             ->map->sum('total');
 
         if ($byHour->isEmpty()) {

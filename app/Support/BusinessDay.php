@@ -15,6 +15,23 @@ class BusinessDay
 {
     public const LATEST_END_HOUR = 6;
 
+    /** Fechas de operación admitidas, sin expresiones relativas ni normalización de días inválidos. */
+    public static function parseDate(string $date): ?CarbonImmutable
+    {
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date)) {
+            return null;
+        }
+
+        [$year, $month, $day] = array_map('intval', explode('-', $date));
+        if ($year < 2000 || $year > static::today()->year || ! checkdate($month, $day, $year)) {
+            return null;
+        }
+
+        $parsed = CarbonImmutable::create($year, $month, $day, 0, 0, 0);
+
+        return $parsed->lte(static::today()) ? $parsed : null;
+    }
+
     public static function endHour(): int
     {
         return min(self::LATEST_END_HOUR, max(0, (int) Setting::value('day_ends_at', '0')));

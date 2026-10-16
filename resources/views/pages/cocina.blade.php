@@ -3,6 +3,7 @@
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -61,15 +62,24 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
 
     public function markReady(int $id): void
     {
-        $order = Order::findOrFail($id);
-        $order->update(['ready_at' => now()]);
+        $order = Order::find($id);
+        $changed = Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
+            ->whereNull('ready_at')->whereNull('dispatched_at')->whereNull('delivered_at')
+            ->update(['ready_at' => now(), 'version' => DB::raw('version + 1')]);
+        if (! $changed) {
+            $this->dispatch('toast', message: 'El pedido cambió y ya no se puede marcar listo. Recarga la lista.', type: 'error');
+
+            return;
+        }
         unset($this->queue, $this->ready);
         $this->dispatch('toast', message: '#'.$order->daily_number.' listo');
     }
 
     public function unready(int $id): void
     {
-        Order::whereKey($id)->update(['ready_at' => null]);
+        Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
+            ->whereNotNull('ready_at')->whereNull('dispatched_at')->whereNull('delivered_at')
+            ->update(['ready_at' => null, 'version' => DB::raw('version + 1')]);
         unset($this->queue, $this->ready);
     }
 };
@@ -126,9 +136,9 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
         <div class="flex min-w-0 items-center gap-2 sm:gap-3">
             <a href="{{ route('pedidos') }}" class="grid size-11 place-items-center rounded-xl bg-white/10 hover:bg-white/15" aria-label="Volver a Pedidos" data-tour="cocina-volver"><x-icon name="left" /></a>
             <h1 class="font-display text-3xl font-bold sm:text-4xl">Cocina</h1>
-            <button type="button" data-tour-start="cocina" class="inline-flex h-10 items-center gap-1.5 rounded-full border border-white/15 px-3 text-sm font-medium text-white/75 hover:bg-white/10 hover:text-white"
+            <button type="button" data-tour-start="cocina" class="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-white/15 px-3 text-sm font-medium text-white/75 hover:bg-white/10 hover:text-white max-sm:hidden"
                     aria-label="Tutorial de esta pantalla" title="Tutorial de esta pantalla"><x-icon name="help" class="size-4" /> Tutorial</button>
-            <span class="num rounded-full bg-[#ffc233] px-3 py-0.5 text-2xl font-bold text-[#33200f]">{{ $this->queue->count() }}</span>
+            <span class="num shrink-0 rounded-full bg-[#ffc233] px-3 py-0.5 text-2xl font-bold text-[#33200f]">{{ $this->queue->count() }}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
             <button type="button" @click="toggleSound()" class="inline-flex h-11 items-center gap-2 rounded-xl bg-white/10 px-3 text-sm font-semibold hover:bg-white/15"
@@ -198,7 +208,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
                                         <span @class(['rounded-md px-2 py-0.5 font-semibold', 'bg-[#f08a3c] text-[#33200f]' => $order->isDelivery(), 'bg-white/12' => ! $order->isDelivery()])>{{ $order->serviceLabel() }}</span>
                                     @endif
                                     @if ($pickup)
-                                        <span class="rounded-md bg-[#f08a3c] px-2 py-0.5 font-semibold text-[#33200f]">Recoge {{ $order->pickup_at->format('g:i a') }}</span>
+                                        <span class="rounded-md bg-[#f08a3c] px-2 py-0.5 font-semibold text-[#33200f]">{{ $order->scheduleVerb() }} {{ $order->pickup_at->format('g:i a') }}</span>
                                     @else
                                         <span :class="(now - {{ $since }}) > 15 * 60000 ? 'font-bold text-[#ff6b5e]' : 'text-white/60'"
                                               x-text="(() => { const m = Math.max(0, Math.floor((now - {{ $since }}) / 60000)); return m < 1 ? 'recién' : (m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min') })()"></span>

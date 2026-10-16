@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Order;
 use App\Models\Product;
+use Illuminate\Support\Facades\Validator;
 
 /**
  * Convierte los renglones que arma el navegador en partidas de la orden.
@@ -15,12 +16,40 @@ class OrderBuilder
     /** Lo más que cabe en order_items.unit_cost. */
     public const MAX_UNIT_COST = 999999.9999;
 
+    public const MAX_TOTAL = 99999999.99;
+
+    public const MAX_LINES = 200;
+
     /**
      * @param  array<int, array{product_id: int, qty: int, without?: array<int>, extras?: array<int>, notes?: ?string}>  $lines
-     * @return array{items: array<int, array<string, mixed>>, total: float, missing: array<int, string>, unavailable: array<int, string>}
+     * @return array{items: array<int, array<string, mixed>>, total: float, missing: array<int, string>, unavailable: array<int, string>, error?: string}
      */
     public static function items(array $lines): array
     {
+        $failure = ['items' => [], 'total' => 0.0, 'missing' => [], 'unavailable' => [], 'error' => 'Revisa el pedido: usa hasta 200 renglones, cantidades de 1 a 999 e indicaciones de texto.'];
+        if (count($lines) > self::MAX_LINES) {
+            return $failure;
+        }
+
+        $invalid = Validator::make(['lines' => $lines], [
+            'lines' => ['array', 'max:'.self::MAX_LINES],
+            'lines.*' => ['required', 'array'],
+            'lines.*.product_id' => ['required', 'integer', 'min:1', 'max:2147483647'],
+            'lines.*.qty' => ['required', 'integer', 'min:1', 'max:999'],
+            'lines.*.notes' => ['nullable', 'string'],
+            'lines.*.courtesy' => ['sometimes', 'boolean'],
+            'lines.*.without' => ['sometimes', 'array', 'max:200'],
+            'lines.*.extras' => ['sometimes', 'array', 'max:200'],
+            'lines.*.choices' => ['sometimes', 'array', 'max:200'],
+            'lines.*.without.*' => ['integer', 'min:1', 'max:2147483647'],
+            'lines.*.extras.*' => ['integer', 'min:1', 'max:2147483647'],
+            'lines.*.choices.*' => ['integer', 'min:1', 'max:2147483647'],
+        ])->fails();
+
+        if ($invalid) {
+            return $failure;
+        }
+
         $lines = collect($lines)
             ->filter(fn ($l) => is_array($l) && (int) ($l['qty'] ?? 0) > 0 && isset($l['product_id']))
             ->values();
@@ -81,6 +110,10 @@ class OrderBuilder
 
             $subtotal = round($unitPrice * $qty, 2);
             $total += $subtotal;
+
+            if (! is_finite($total) || $total > self::MAX_TOTAL || $unitPrice < 0 || $unitPrice > self::MAX_TOTAL) {
+                return ['items' => [], 'total' => 0.0, 'missing' => [], 'unavailable' => [], 'error' => 'El total es demasiado alto. Revisa las cantidades.'];
+            }
 
             $modifiers = $choices->map(fn ($c) => ['type' => 'choice', 'id' => $c['choice']->id, 'group' => $c['group']->name, 'name' => $c['choice']->name, 'price' => (float) $c['choice']->price])
                 ->concat($without->map(fn ($id) => ['type' => 'without', 'id' => $id, 'name' => $removable[$id]->name]))

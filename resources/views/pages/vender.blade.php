@@ -7,9 +7,10 @@ use App\Models\Product;
 use App\Models\Setting;
 use App\Support\BusinessDay;
 use App\Support\OrderBuilder;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Renderless;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
@@ -36,6 +37,14 @@ new #[Title('Vender')] class extends Component
 
     /** @var array<int, array{product_id: int, qty: int, without: array<int>, extras: array<int>, notes: string}> */
     public array $lines = [];
+
+    public string $operationToken = '';
+
+    #[Locked]
+    public ?int $orderVersion = null;
+
+    #[Locked]
+    public ?int $openedOrderId = null;
 
     public ?string $label = null;
 
@@ -100,6 +109,7 @@ new #[Title('Vender')] class extends Component
 
     public function mount(): void
     {
+        $this->operationToken = (string) Str::uuid();
         // Desde Pedidos, "Corregir cobro": la venta se cancela y el pedido abre aquí para cobrarlo de nuevo.
         $correcting = session(self::CORRECT_SESSION_KEY) ? Order::with(['items', 'payments'])->where('status', OrderStatus::Paid)->find(session(self::CORRECT_SESSION_KEY)) : null;
 
@@ -127,6 +137,8 @@ new #[Title('Vender')] class extends Component
     /** Pasa al formulario los datos de un pedido guardado. */
     protected function fillFrom(Order $order): void
     {
+        $this->orderVersion = $order->version;
+        $this->openedOrderId = $this->orderId;
         $this->lines = OrderBuilder::linesFrom($order);
         $this->label = $order->label;
         $this->service = $order->service ?? 'here';
@@ -189,13 +201,17 @@ new #[Title('Vender')] class extends Component
     #[Computed]
     public function packagingFee(): float
     {
-        return (float) Setting::value('packaging_fee', '0');
+        $fee = (float) Setting::value('packaging_fee', '0');
+
+        return is_finite($fee) ? round(max(0, $fee), 2) : 0.0;
     }
 
     #[Computed]
     public function defaultDeliveryFee(): float
     {
-        return (float) Setting::value('delivery_fee', '0');
+        $fee = (float) Setting::value('delivery_fee', '0');
+
+        return is_finite($fee) ? round(max(0, $fee), 2) : 0.0;
     }
 
     /**
@@ -241,16 +257,17 @@ new #[Title('Vender')] class extends Component
     protected function amountError(): ?array
     {
         $fields = [
-            'discount' => ['el descuento', 'discount'],
-            'tip' => ['la propina', 'tip'],
-            'deliveryFee' => ['el envío', 'delivery-fee'],
-            'received' => ['lo recibido', 'received'],
-            'cashPart' => ['el efectivo', 'cash-part'],
+            'discount' => ['El descuento es demasiado alto', 'discount'],
+            'tip' => ['La propina es demasiado alta', 'tip'],
+            'deliveryFee' => ['El envío es demasiado alto', 'delivery-fee'],
+            'received' => ['Lo recibido es demasiado alto', 'received'],
+            'cashPart' => ['El efectivo es demasiado alto', 'cash-part'],
         ];
 
         foreach ($fields as $property => [$name, $id]) {
-            if (is_numeric($this->{$property}) && (float) $this->{$property} > self::MAX_AMOUNT) {
-                return $this->fail('Revisa '.$name.': el monto es demasiado alto.', $id);
+            $value = $this->{$property};
+            if ($value !== null && $value !== '' && (! is_numeric($value) || ! is_finite((float) $value) || (float) $value < 0 || (float) $value > self::MAX_AMOUNT)) {
+                return $this->fail($name.' (máximo '.money(self::MAX_AMOUNT).').', $id);
             }
         }
 
@@ -261,6 +278,7 @@ new #[Title('Vender')] class extends Component
     protected function linesError(array $built): ?array
     {
         $error = match (true) {
+            isset($built['error']) => $built['error'],
             $built['unavailable'] !== [] => 'Ya no se vende: '.implode(', ', $built['unavailable']).'. Quítalo del pedido.',
             $built['items'] === [] => 'El pedido está vacío.',
             $built['missing'] !== [] => 'Falta elegir: '.implode(', ', $built['missing']).'.',
@@ -299,15 +317,23 @@ new #[Title('Vender')] class extends Component
         return $at->lt(now()->subHour()) ? $at->addDay() : $at;
     }
 
-    protected function feeFor(string $service): float
+    protected function feeFor(string $service, ?Order $source = null): float
     {
-        return in_array($service, ['togo', 'delivery'], true) ? ($this->savedFee ?? $this->packagingFee) : 0.0;
+        if (! in_array($service, ['togo', 'delivery'], true)) {
+            return 0.0;
+        }
+
+        $source ??= $this->orderId ? Order::find($this->orderId) : ($this->undoneId ? Order::find($this->undoneId) : null);
+        $fee = $source && in_array($source->service, ['togo', 'delivery'], true)
+            ? (float) $source->packaging_fee : $this->packagingFee;
+
+        return is_finite($fee) ? round(max(0, $fee), 2) : 0.0;
     }
 
     /** Descuento en pesos sobre productos + empaque (nunca más que eso). */
     protected function discountFor(float $base): float
     {
-        $value = is_numeric($this->discount) ? max(0, (float) $this->discount) : 0;
+        $value = is_numeric($this->discount) ? round(max(0, (float) $this->discount), 2) : 0;
         $amount = $this->discountType === 'percent' ? $base * min(100, $value) / 100 : $value;
 
         return round(min($base, $amount), 2);
@@ -324,27 +350,46 @@ new #[Title('Vender')] class extends Component
     }
 
     /**
-     * Guarda el pedido. Devuelve null si el pedido que se editaba ya no está abierto
-     * porque se cobró o se canceló en otro dispositivo.
+     * Guarda el pedido bajo candado. Devuelve un error legible si cambió el formulario
+     * o null si el pedido ya se cobró o se canceló en otro dispositivo.
      */
-    protected function store(OrderStatus $status, array $built): ?Order
+    protected function store(OrderStatus $status, array $built): Order|array|null
     {
-        // El número del día sale de max() + 1: el candado evita que dos cobros a la vez repitan número.
-        return Cache::lock('orders:daily-number', 10)->block(5, fn () => DB::transaction(function () use ($status, $built) {
+        if (! Str::isUuid($this->operationToken)) {
+            return $this->fail('Algo falló al enviar el pedido. Recarga la página e inténtalo otra vez.');
+        }
+
+        return DB::transaction(function () use ($status, $built) {
+            // El candado de Postgres se comparte entre dispositivos y dura toda la transacción.
+            DB::select('SELECT pg_advisory_xact_lock(72431901)');
+            if ($existing = $this->completedOperation()) {
+                return $existing;
+            }
+
+            $undone = null;
             if ($this->orderId) {
                 $order = Order::with('items')->whereKey($this->orderId)->where('status', OrderStatus::Open)->lockForUpdate()->first();
 
                 if (! $order) {
                     return null;
                 }
+                if ($this->openedOrderId !== $order->id || $this->orderVersion !== $order->version) {
+                    return $this->fail('Este pedido se modificó desde otro celular. Recarga para ver los cambios antes de cobrar.');
+                }
             } else {
-                $undone = $this->undoneId ? Order::with('items')->where('status', OrderStatus::Cancelled)->find($this->undoneId) : null;
+                $undone = $this->undoneId ? Order::with('items')->whereKey($this->undoneId)->lockForUpdate()->first() : null;
+                if ($this->undoneId && (! $undone || $undone->status !== OrderStatus::Cancelled || $undone->cancel_reason !== Order::CORRECTION || $undone->wasCorrected())) {
+                    return $this->fail('Esta venta ya se corrigió desde otro lado. Recarga la página.');
+                }
+                $keepNumber = $undone && BusinessDay::isCurrent($undone->sold_at);
 
                 $order = new Order([
                     'user_id' => auth()->id(),
-                    'daily_number' => $this->dailyNumber ?? Order::nextDailyNumber(),
+                    'operation_token' => $this->operationToken,
+                    'replaces_order_id' => $undone?->id,
+                    'daily_number' => $keepNumber ? $undone->daily_number : Order::nextDailyNumber(),
                     // Con su mismo número conserva su lugar en la cocina y el tiempo que lleva esperando.
-                    'sold_at' => $undone && $this->dailyNumber ? $undone->sold_at : now(),
+                    'sold_at' => $keepNumber ? $undone->sold_at : now(),
                 ]);
 
                 // Si lleva lo mismo, la cocina ya lo tenía: no regresa como nuevo si ya estaba listo, en camino o entregado.
@@ -360,8 +405,16 @@ new #[Title('Vender')] class extends Component
             $changed = $order->exists && OrderBuilder::signature($order->items) !== OrderBuilder::signature($built['items']);
 
             $paid = $status === OrderStatus::Paid;
-            $base = $built['total'] + $this->feeFor($this->service);
+            $fee = $this->feeFor($this->service, $order->exists ? $order : $undone);
+            $base = $built['total'] + $fee;
             $delivery = $this->service === 'delivery';
+            $total = round(max(0, $base - $this->discountFor($base)) + $this->deliveryFeeAmount(), 2);
+            if (! is_finite($total) || $base > OrderBuilder::MAX_TOTAL || $total + ($paid ? $this->tipAmount() : 0) > OrderBuilder::MAX_TOTAL) {
+                return $this->fail('El total es demasiado alto. Revisa las cantidades.');
+            }
+            if ($paid && ($failure = $this->paymentError($total + $this->tipAmount()))) {
+                return $failure;
+            }
 
             $order->fill([
                 'status' => $status,
@@ -371,14 +424,14 @@ new #[Title('Vender')] class extends Component
                 'delivery_phone' => $delivery ? $this->clip($this->phone, 30) : null,
                 'delivery_notes' => $delivery ? $this->clip($this->addressNotes, 160) : null,
                 'delivery_fee' => $this->deliveryFeeAmount(),
-                'packaging_fee' => $this->feeFor($this->service),
+                'packaging_fee' => $fee,
                 'pickup_at' => $this->pickupAt(),
                 'payment_method' => $paid ? $this->method : null,
                 'payment_reference' => $paid && $this->method !== 'cash' ? $this->clip($this->reference, 255) : null,
                 'paid_at' => $paid ? now() : null,
                 'discount' => $this->discountFor($base),
                 'tip' => $paid ? $this->tipAmount() : 0,
-                'total' => max(0, $base - $this->discountFor($base)) + $this->deliveryFeeAmount(),
+                'total' => $total,
             ]);
 
             if ($changed) {
@@ -393,13 +446,29 @@ new #[Title('Vender')] class extends Component
                 $order->recordPayments($this->method, (float) $this->cashPart, $this->otherMethod, $this->clip($this->reference, 255));
             }
 
+            DB::table('order_operations')->insert(['token' => $this->operationToken, 'order_id' => $order->id]);
+
             return $order;
-        }));
+        });
+    }
+
+    protected function completedOperation(): ?Order
+    {
+        if (! Str::isUuid($this->operationToken)) {
+            return null;
+        }
+
+        $id = DB::table('order_operations')->where('token', $this->operationToken)->value('order_id');
+
+        return $id ? Order::find($id) : Order::where('operation_token', $this->operationToken)->first();
     }
 
     protected function finish(): void
     {
         $this->reset('lines', 'label', 'reference', 'received', 'orderId', 'openPay', 'pickupTime', 'discount', 'tip', 'cashPart', 'address', 'phone', 'addressNotes', 'deliveryFee', 'dailyNumber', 'undoneId', 'savedFee', 'correcting');
+        $this->operationToken = (string) Str::uuid();
+        $this->orderVersion = null;
+        $this->openedOrderId = null;
         $this->method = 'cash';
         $this->discountType = 'amount';
         $this->otherMethod = 'transfer';
@@ -436,9 +505,33 @@ new #[Title('Vender')] class extends Component
         return round((float) $this->received - $cashDue, 2);
     }
 
+    protected function paymentError(float $due): ?array
+    {
+        if ($this->method === 'mixed') {
+            if (! is_numeric($this->cashPart) || (float) $this->cashPart <= 0 || (float) $this->cashPart >= $due) {
+                return $this->fail('Escribe cuánto pagan en efectivo. Debe ser menos que el total; el resto va por transferencia o tarjeta.', 'cash-part');
+            }
+            if (! in_array($this->otherMethod, ['transfer', 'card'], true)) {
+                return ['ok' => false, 'error' => 'Elige con qué se paga el resto.'];
+            }
+        }
+
+        if (($this->changeFor($due) ?? 0) < 0) {
+            return $this->fail($this->method === 'mixed'
+                ? 'El efectivo recibido no alcanza para la parte en efectivo.'
+                : 'El monto recibido no alcanza para el total.', 'received');
+        }
+
+        return null;
+    }
+
     /** @return array{ok: bool, error?: string, closed?: bool} */
     public function charge(): array
     {
+        if ($order = $this->completedOperation()) {
+            return $this->charged($order);
+        }
+
         if (! PaymentMethod::tryFrom($this->method)) {
             return ['ok' => false, 'error' => 'Elige la forma de pago.'];
         }
@@ -452,31 +545,28 @@ new #[Title('Vender')] class extends Component
         $base = $built['total'] + $this->feeFor($this->service);
         $due = max(0, $base - $this->discountFor($base)) + $this->deliveryFeeAmount() + $this->tipAmount();
 
-        if ($this->method === 'mixed') {
-            if (! is_numeric($this->cashPart) || (float) $this->cashPart <= 0 || (float) $this->cashPart >= $due) {
-                return $this->fail('En pago mixto escribe cuánto se paga en efectivo (menos del total).', 'cash-part');
-            }
-            if (! in_array($this->otherMethod, ['transfer', 'card'], true)) {
-                return ['ok' => false, 'error' => 'Elige con qué se paga el resto.'];
-            }
-        }
-
-        if (($this->changeFor($due) ?? 0) < 0) {
-            return $this->fail($this->method === 'mixed'
-                ? 'El efectivo recibido no alcanza para la parte en efectivo.'
-                : 'El monto recibido no alcanza para el total.', 'received');
+        if ($failure = $this->paymentError($due)) {
+            return $failure;
         }
 
         $order = $this->store(OrderStatus::Paid, $built);
 
+        if (is_array($order)) {
+            return $order;
+        }
         if (! $order) {
             return $this->orderGone();
         }
 
+        return $this->charged($order);
+    }
+
+    protected function charged(Order $order): array
+    {
         $this->lastOrderId = $order->id;
         $this->lastTotal = (float) $order->total + (float) $order->tip;
         $this->lastTitle = $this->title($order);
-        $this->lastChange = $this->changeFor($due);
+        $this->lastChange = $this->changeFor((float) $order->total + (float) $order->tip);
         $this->finish();
         $this->dispatch('pending-count', count: Order::pendingCount());
 
@@ -486,6 +576,12 @@ new #[Title('Vender')] class extends Component
     /** Guarda el pedido con su nombre para cobrarlo después. */
     public function saveOpen(): array
     {
+        if ($this->completedOperation()) {
+            $this->finish();
+
+            return ['ok' => true];
+        }
+
         if (trim((string) $this->label) === '') {
             return $this->fail('Escribe para quién es (un nombre o el carro) para encontrarlo después.', 'label');
         }
@@ -498,6 +594,9 @@ new #[Title('Vender')] class extends Component
 
         $order = $this->store(OrderStatus::Open, $built);
 
+        if (is_array($order)) {
+            return $order;
+        }
         if (! $order) {
             return $this->orderGone();
         }
@@ -532,7 +631,22 @@ new #[Title('Vender')] class extends Component
     /** Cancela una venta y regresa el pedido completo (servicio, domicilio, descuento, pago) para corregirlo y volver a cobrarlo. */
     protected function correct(Order $order): void
     {
-        $order->cancel(Order::CORRECTION);
+        $order = DB::transaction(function () use ($order) {
+            $current = Order::with(['items', 'payments'])->whereKey($order->id)->lockForUpdate()->first();
+            if (! $current || $current->status !== OrderStatus::Paid) {
+                return null;
+            }
+            $current->cancel(Order::CORRECTION);
+
+            return $current;
+        });
+        if (! $order) {
+            $this->dispatch('toast', message: 'La venta cambió en otro dispositivo. Recarga la página.', type: 'error');
+
+            return;
+        }
+        $this->orderId = null;
+        $this->operationToken = (string) Str::uuid();
 
         $this->fillFrom($order);
         $this->tip = (float) $order->tip > 0 ? $this->plain($order->tip) : null;
@@ -612,7 +726,7 @@ new #[Title('Vender')] class extends Component
         openSheet() { this.error = ''; this.sheet = true; this.refresh() },
         // Borrador del pedido en este equipo: sobrevive a una recarga o a salir de Vender sin cobrar.
         draftKey: 'vender:borrador',
-        draftFields: ['label', 'service', 'address', 'phone', 'addressNotes', 'deliveryFee', 'pickupTime', 'discount', 'discountType', 'dailyNumber', 'undoneId'],
+        draftFields: ['operationToken', 'label', 'service', 'address', 'phone', 'addressNotes', 'deliveryFee', 'pickupTime', 'discount', 'discountType', 'dailyNumber', 'undoneId'],
         tourDemo: false,
         startTourDemo() {
             const sample = Object.values(this.catalog).find(p => ! p.soldOut && ! this.needsChoice(p.id));
@@ -752,10 +866,10 @@ new #[Title('Vender')] class extends Component
             const v = $wire.deliveryFee;
             return v === null || v === '' || isNaN(v) ? this.deliveryDefault : Math.max(0, Number(v));
         },
-        r2(n) { return Math.round(n * 100) / 100 },
+        r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100 },
         subtotal() { return this.r2(this.list().reduce((t, l) => t + this.unit(l) * l.qty, 0) + (this.count() ? this.packaging() : 0)) },
         discountAmt() {
-            const v = Math.max(0, Number($wire.discount) || 0), base = this.subtotal();
+            const v = this.r2(Math.max(0, Number($wire.discount) || 0)), base = this.subtotal();
             return this.r2(Math.min(base, $wire.discountType === 'percent' ? base * Math.min(100, v) / 100 : v));
         },
         total() { return this.r2(Math.max(0, this.subtotal() - this.discountAmt()) + this.shipping()) },
@@ -1087,13 +1201,12 @@ new #[Title('Vender')] class extends Component
                         <p class="label">¿Cuándo?</p>
                         <div class="segmented" role="group" aria-label="Cuándo">
                             <button type="button" @click="later = false; $wire.pickupTime = null" :aria-pressed="! later">Ahora</button>
-                            {{-- Quien recoge después se lleva el pedido: "Aquí" no tiene sentido con una hora de recogida. --}}
-                            <button type="button" @click="later = true; if ($wire.service === 'here') $wire.service = 'togo'; $nextTick(() => $refs.pickup?.focus())" :aria-pressed="later">Más tarde</button>
+                            <button type="button" @click="later = true; $nextTick(() => $refs.pickup?.focus())" :aria-pressed="later">Más tarde</button>
                         </div>
                     </div>
                 </div>
                 <div x-show="later" x-cloak>
-                    <label class="label" for="pickup">Hora en que lo recogen</label>
+                    <label class="label" for="pickup" x-text="{ delivery: 'Hora de entrega', here: 'Hora a la que llegan', togo: 'Hora en que lo recogen' }[$wire.service] ?? 'Hora en que lo recogen'">Hora a la que llegan</label>
                     <input id="pickup" x-ref="pickup" type="time" x-model="$wire.pickupTime" class="input" step="300">
                 </div>
 
@@ -1136,8 +1249,9 @@ new #[Title('Vender')] class extends Component
                     <button type="button" x-show="! discOpen" @click="discOpen = true; $nextTick(() => $refs.disc.focus())" class="btn-quiet -ml-2.5"><x-icon name="plus" class="size-4" /> Descuento</button>
                     <div x-show="discOpen" x-cloak>
                         <p class="label">Descuento</p>
+                        <p class="mb-2 text-sm text-muted">Máximo aplicado: <span x-text="$wire.discountType === 'percent' ? '100%' : fmt(subtotal())"></span>.</p>
                         <div class="flex gap-2">
-                            <input x-ref="disc" id="discount" type="number" inputmode="decimal" min="0" step="0.01" x-model="$wire.discount" class="input num flex-1 text-xl font-semibold" placeholder="0">
+                            <input x-ref="disc" id="discount" type="number" inputmode="decimal" min="0" step="0.01" :max="$wire.discountType === 'percent' ? 100 : subtotal()" @change="$wire.discount = $el.value === '' ? null : String(r2(Math.max(0, Number($el.value) || 0)))" x-model="$wire.discount" class="input num flex-1 text-xl font-semibold" placeholder="0">
                             <div class="segmented w-28 shrink-0" role="group" aria-label="Tipo de descuento">
                                 <button type="button" @click="$wire.discountType = 'amount'" :aria-pressed="$wire.discountType === 'amount'">$</button>
                                 <button type="button" @click="$wire.discountType = 'percent'" :aria-pressed="$wire.discountType === 'percent'">%</button>
@@ -1146,6 +1260,8 @@ new #[Title('Vender')] class extends Component
                         </div>
                     </div>
                 </div>
+
+                <p x-show="subtotal() > 0 && discountAmt() >= subtotal()" x-cloak role="status" class="rounded-xl bg-naranja-soft p-3 text-sm font-semibold">El descuento cubre todo el pedido. Solo se cobrará el envío y la propina, si hay.</p>
 
                 <div data-tour="pago">
                     <p class="label">Forma de pago</p>

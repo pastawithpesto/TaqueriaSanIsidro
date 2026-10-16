@@ -11,14 +11,24 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
-#[Fillable(['user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
+#[Fillable(['operation_token', 'replaces_order_id', 'user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
 class Order extends Model
 {
+    protected static function booted(): void
+    {
+        static::updating(function (Order $order) {
+            $order->version = (int) $order->getOriginal('version') + 1;
+        });
+    }
+
     protected function casts(): array
     {
         return [
             'status' => OrderStatus::class,
+            'version' => 'integer',
             'payment_method' => PaymentMethod::class,
             'total' => 'decimal:2',
             'packaging_fee' => 'decimal:2',
@@ -99,6 +109,16 @@ class Order extends Model
         return $this->pickup_at ?? $this->sold_at;
     }
 
+    /** Lo que significa la hora de un pedido para más tarde: "Recoge 3:00 pm", "Llegan 3:00 pm" o "Entrega 3:00 pm". */
+    public function scheduleVerb(): string
+    {
+        return match ($this->service) {
+            'delivery' => 'Entrega',
+            'here' => 'Llegan',
+            default => 'Recoge',
+        };
+    }
+
     public function isToGo(): bool
     {
         return $this->service === 'togo';
@@ -137,22 +157,36 @@ class Order extends Model
      */
     public function recordPayments(string $method, ?float $cashPart = null, string $otherMethod = 'transfer', ?string $reference = null): void
     {
-        $due = round((float) $this->total + (float) $this->tip, 2);
-        $reference = $method === 'cash' ? null : $reference;
+        DB::transaction(function () use ($method, $cashPart, $otherMethod, $reference) {
+            $current = static::whereKey($this->id)->lockForUpdate()->firstOrFail();
+            if ($current->status !== OrderStatus::Paid) {
+                throw ValidationException::withMessages(['payment' => 'La venta ya no está pagada. Recarga antes de cambiar el pago.']);
+            }
 
-        if ($method === 'mixed') {
-            $cash = round(min($due, max(0, (float) $cashPart)), 2);
-            $payments = array_values(array_filter([
-                ['method' => 'cash', 'amount' => $cash, 'reference' => null],
-                ['method' => $otherMethod, 'amount' => round($due - $cash, 2), 'reference' => $reference],
-            ], fn ($p) => $p['amount'] > 0));
-        } else {
-            $payments = [['method' => $method, 'amount' => $due, 'reference' => $reference]];
-        }
+            $this->setRawAttributes($current->getAttributes(), true);
+            $due = round((float) $this->total + (float) $this->tip, 2);
+            if (! in_array($method, ['cash', 'transfer', 'card', 'mixed'], true)
+                || ($method === 'mixed' && (! is_finite((float) $cashPart) || $cashPart <= 0 || $cashPart >= $due || ! in_array($otherMethod, ['transfer', 'card'], true)))) {
+                throw ValidationException::withMessages(['payment' => 'Revisa la forma de pago y el monto en efectivo.']);
+            }
 
-        $this->update(['payment_method' => $method, 'payment_reference' => $reference]);
-        $this->payments()->delete();
-        $this->payments()->createMany($payments);
+            $reference = $method === 'cash' ? null : $reference;
+
+            if ($method === 'mixed') {
+                $cash = round(min($due, max(0, (float) $cashPart)), 2);
+                $payments = array_values(array_filter([
+                    ['method' => 'cash', 'amount' => $cash, 'reference' => null],
+                    ['method' => $otherMethod, 'amount' => round($due - $cash, 2), 'reference' => $reference],
+                ], fn ($p) => $p['amount'] > 0));
+            } else {
+                $payments = [['method' => $method, 'amount' => $due, 'reference' => $reference]];
+            }
+
+            $this->update(['payment_method' => $method, 'payment_reference' => $reference]);
+            $this->payments()->delete();
+            $this->payments()->createMany($payments);
+            $this->unsetRelation('payments');
+        });
     }
 
     /** Motivo de una venta que se canceló para corregirla y cobrarla de nuevo. */
@@ -171,11 +205,11 @@ class Order extends Model
     public function wasCorrected(): bool
     {
         return $this->status === OrderStatus::Cancelled
-            && static::whereKeyNot($this->id)
+            && (static::where('replaces_order_id', $this->id)->exists() || static::whereKeyNot($this->id)
                 ->where('daily_number', $this->daily_number)
                 ->where('status', '!=', OrderStatus::Cancelled)
                 ->whereBetween('sold_at', [BusinessDay::start(BusinessDay::of($this->sold_at)), BusinessDay::end(BusinessDay::of($this->sold_at))])
-                ->exists();
+                ->exists());
     }
 
     /** "3 Hamburguesa combo, 1 Torta": junta las partidas del mismo producto aunque lleven indicaciones distintas. */

@@ -402,7 +402,7 @@ class SalesTest extends TestCase
             ->set('lines', [$this->line($taco, 1)])
             ->set('tip', '500000')
             ->call('charge')
-            ->assertReturned(['ok' => false, 'error' => 'Revisa la propina: el monto es demasiado alto.', 'field' => 'tip']);
+            ->assertReturned(['ok' => false, 'error' => 'La propina es demasiado alta (máximo $100,000).', 'field' => 'tip']);
 
         $this->assertSame(0, Order::count());
     }

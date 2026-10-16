@@ -3,6 +3,7 @@
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -36,8 +37,16 @@ new #[Title('Pedidos')] class extends Component
 
     public function deliver(int $id): void
     {
-        $order = Order::findOrFail($id);
-        $order->update(['delivered_at' => now()]);
+        $order = Order::find($id);
+        $changed = Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
+            ->whereNull('delivered_at')
+            ->where(fn ($q) => $q->whereNull('service')->orWhere('service', '!=', 'delivery')->orWhereNotNull('dispatched_at'))
+            ->update(['delivered_at' => now(), 'version' => DB::raw('version + 1')]);
+        if (! $changed) {
+            $this->dispatch('toast', message: 'No se pudo marcar como entregado. Recarga la lista.', type: 'error');
+
+            return;
+        }
         unset($this->pending, $this->delivered);
         $this->dispatch('pending-count', count: Order::pendingCount());
 
@@ -47,22 +56,36 @@ new #[Title('Pedidos')] class extends Component
     /** A domicilio: sale con el repartidor. Si ya salió, ya está preparado: deja la cocina. */
     public function dispatchOrder(int $id): void
     {
-        $order = Order::findOrFail($id);
-        $order->update(['dispatched_at' => now(), 'ready_at' => $order->ready_at ?? now()]);
+        $order = Order::find($id);
+        $changed = Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
+            ->where('service', 'delivery')->whereNull('dispatched_at')->whereNull('delivered_at')->where('version', $order?->version)
+            ->update(['dispatched_at' => now(), 'ready_at' => $order?->ready_at ?? now(), 'version' => DB::raw('version + 1')]);
+        if (! $changed) {
+            $this->dispatch('toast', message: 'Este pedido no se puede enviar: ya salió, se canceló o no es a domicilio.', type: 'error');
+
+            return;
+        }
         unset($this->pending);
         $this->dispatch('toast', message: '#'.$order->daily_number.' en camino');
     }
 
     public function undeliver(int $id): void
     {
-        Order::whereKey($id)->update(['delivered_at' => null]);
+        Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])->whereNotNull('delivered_at')
+            ->update(['delivered_at' => null, 'version' => DB::raw('version + 1')]);
         unset($this->pending, $this->delivered);
         $this->dispatch('pending-count', count: Order::pendingCount());
     }
 
     public function cancel(int $id): void
     {
-        Order::where('status', OrderStatus::Open)->find($id)?->cancel();
+        $changed = Order::whereKey($id)->where('status', OrderStatus::Open)
+            ->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => now(), 'cancel_reason' => null, 'version' => DB::raw('version + 1')]);
+        if (! $changed) {
+            $this->dispatch('toast', message: 'El pedido ya se cobró o se canceló. Recarga la lista.', type: 'error');
+
+            return;
+        }
         unset($this->pending, $this->stale);
         $this->dispatch('toast', message: 'Pedido cancelado');
         $this->dispatch('pending-count', count: Order::pendingCount());
@@ -121,7 +144,7 @@ new #[Title('Pedidos')] class extends Component
                                         <span class="badge bg-naranja-soft text-ink"
                                               :class="({{ $pickup }} - now) < 10 * 60000 && '!bg-chile !text-white'">
                                             <x-icon name="clock" class="size-3.5" />
-                                            Recoge {{ $order->pickup_at->format('g:i a') }}
+                                            {{ $order->scheduleVerb() }} {{ $order->pickup_at->format('g:i a') }}
                                             <span x-text="(() => { const m = Math.round(({{ $pickup }} - now) / 60000); return m <= 0 ? '(ya)' : (m < 60 ? '(en ' + m + ' min)' : '(en ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min)') })()"></span>
                                         </span>
                                     @else

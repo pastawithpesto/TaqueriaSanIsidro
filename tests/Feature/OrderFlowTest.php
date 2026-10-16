@@ -253,6 +253,27 @@ class OrderFlowTest extends TestCase
         $this->assertSame(['Ahorita', 'Recoge tarde'], $queue->pluck('label')->all());
     }
 
+    public function test_an_order_to_eat_here_can_be_for_later_and_says_when_they_arrive(): void
+    {
+        $this->travelTo(today()->setTime(13, 0));
+
+        Livewire::test('pages::vender')
+            ->set('lines', [['product_id' => $this->torta->id, 'qty' => 1]])
+            ->set('label', 'Reserva')
+            ->set('service', 'here')
+            ->set('pickupTime', '15:00')
+            ->call('saveOpen');
+
+        $order = Order::where('label', 'Reserva')->sole();
+        $this->assertSame('here', $order->service);
+        $this->assertSame('15:00', $order->pickup_at->format('H:i'));
+        $this->assertSame('Llegan', $order->scheduleVerb());
+        $this->assertSame('Recoge', (new Order(['service' => 'togo']))->scheduleVerb());
+        $this->assertSame('Entrega', (new Order(['service' => 'delivery']))->scheduleVerb());
+
+        Livewire::test('pages::pedidos')->assertSee('Llegan 3:00 pm');
+    }
+
     public function test_kitchen_marks_orders_ready(): void
     {
         $order = Order::create(['daily_number' => 1, 'status' => 'paid', 'payment_method' => 'cash', 'label' => 'Carro rojo', 'total' => 39, 'sold_at' => now()]);

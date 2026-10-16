@@ -5,6 +5,7 @@ use App\Enums\PaymentMethod;
 use App\Models\Order;
 use App\Support\BusinessDay;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -33,11 +34,7 @@ new #[Title('Ventas')] class extends Component
 
     protected function day(): CarbonImmutable
     {
-        try {
-            return CarbonImmutable::parse($this->date)->startOfDay();
-        } catch (Throwable) {
-            return BusinessDay::today();
-        }
+        return BusinessDay::parseDate($this->date) ?? BusinessDay::today();
     }
 
     #[Computed]
@@ -95,36 +92,52 @@ new #[Title('Ventas')] class extends Component
 
     public function cancel(int $id): void
     {
-        $order = Order::where('status', OrderStatus::Paid)->findOrFail($id);
+        DB::transaction(function () use ($id) {
+            $order = Order::where('status', OrderStatus::Paid)->whereKey($id)->lockForUpdate()->first();
 
-        if (! $this->editable($order)) {
-            $this->refuse();
+            if (! $order) {
+                $this->dispatch('toast', message: 'La venta cambió en otro dispositivo. Recarga la página.', type: 'error');
 
-            return;
-        }
+                return;
+            }
 
-        $order->cancel();
-        $this->changed('Venta cancelada');
+            if (! $this->editable($order)) {
+                $this->refuse();
+
+                return;
+            }
+
+            $order->cancel();
+            $this->changed('Venta cancelada');
+        });
     }
 
     public function restore(int $id): void
     {
-        $order = Order::where('status', OrderStatus::Cancelled)->findOrFail($id);
+        DB::transaction(function () use ($id) {
+            $order = Order::where('status', OrderStatus::Cancelled)->whereKey($id)->lockForUpdate()->first();
 
-        if (! $this->editable($order)) {
-            $this->refuse();
+            if (! $order) {
+                $this->dispatch('toast', message: 'La venta cambió en otro dispositivo. Recarga la página.', type: 'error');
 
-            return;
-        }
+                return;
+            }
 
-        if ($order->wasCorrected()) {
-            $this->dispatch('toast', message: 'Esta venta se corrigió y ya se volvió a cobrar.', type: 'error');
+            if (! $this->editable($order)) {
+                $this->refuse();
 
-            return;
-        }
+                return;
+            }
 
-        $order->update(['status' => $order->payment_method ? OrderStatus::Paid : OrderStatus::Open, 'cancelled_at' => null, 'cancel_reason' => null]);
-        $this->changed('Venta restaurada');
+            if ($order->wasCorrected()) {
+                $this->dispatch('toast', message: 'Esta venta se corrigió y ya se volvió a cobrar.', type: 'error');
+
+                return;
+            }
+
+            $order->update(['status' => $order->payment_method ? OrderStatus::Paid : OrderStatus::Open, 'cancelled_at' => null, 'cancel_reason' => null]);
+            $this->changed('Venta restaurada');
+        });
     }
 
     /** Cobrada mal (faltó o sobró algo): Vender la cancela y la abre con todo para cobrarla de nuevo. */
@@ -166,29 +179,37 @@ new #[Title('Ventas')] class extends Component
     /** El error más común al cobrar: se cambia el pago sin cancelar la venta ni tocar la cocina. */
     public function savePayment(): void
     {
-        $order = Order::where('status', OrderStatus::Paid)->findOrFail($this->payOrderId);
+        DB::transaction(function () {
+            $order = Order::where('status', OrderStatus::Paid)->whereKey($this->payOrderId)->lockForUpdate()->first();
 
-        if (! $this->editable($order)) {
-            $this->refuse();
+            if (! $order) {
+                $this->dispatch('toast', message: 'La venta cambió en otro dispositivo. Recarga la página.', type: 'error');
 
-            return;
-        }
+                return;
+            }
 
-        $due = round((float) $order->total + (float) $order->tip, 2);
+            if (! $this->editable($order)) {
+                $this->refuse();
 
-        $this->validate([
-            'payMethod' => ['required', 'in:cash,transfer,card,mixed'],
-            'payCashPart' => ['exclude_unless:payMethod,mixed', 'required', 'numeric', 'gt:0', 'lt:'.$due],
-            'payOtherMethod' => ['exclude_unless:payMethod,mixed', 'required', 'in:transfer,card'],
-            'payReference' => ['nullable', 'string', 'max:255'],
-        ], [
-            'payCashPart.lt' => 'En pago mixto el efectivo tiene que ser menos que el total.',
-        ], ['payCashPart' => 'efectivo']);
+                return;
+            }
 
-        $order->recordPayments($this->payMethod, (float) $this->payCashPart, $this->payOtherMethod, trim((string) $this->payReference) ?: null);
+            $due = round((float) $order->total + (float) $order->tip, 2);
 
-        $this->showPayment = false;
-        $this->changed('Forma de pago cambiada');
+            $this->validate([
+                'payMethod' => ['required', 'in:cash,transfer,card,mixed'],
+                'payCashPart' => ['exclude_unless:payMethod,mixed', 'required', 'numeric', 'gt:0', 'lt:'.$due],
+                'payOtherMethod' => ['exclude_unless:payMethod,mixed', 'required', 'in:transfer,card'],
+                'payReference' => ['nullable', 'string', 'max:255'],
+            ], [
+                'payCashPart.lt' => 'En pago mixto el efectivo tiene que ser menos que el total.',
+            ], ['payCashPart' => 'efectivo']);
+
+            $order->recordPayments($this->payMethod, (float) $this->payCashPart, $this->payOtherMethod, trim((string) $this->payReference) ?: null);
+
+            $this->showPayment = false;
+            $this->changed('Forma de pago cambiada');
+        });
     }
 };
 ?>
@@ -214,9 +235,7 @@ new #[Title('Ventas')] class extends Component
     $tips = (float) $paid->sum('tip');
     $discounts = (float) $paid->sum('discount') + $paid->flatMap->items->sum(fn ($i) => $i->courtesyValue());
     // Canceladas con Deshacer que se volvieron a cobrar con el mismo número: son correcciones, no ventas perdidas.
-    $isCorrected = fn ($o) => $o->status === OrderStatus::Cancelled && $this->orders->contains(
-        fn ($other) => $other->status !== OrderStatus::Cancelled && $other->daily_number === $o->daily_number && BusinessDay::of($other->sold_at)->equalTo(BusinessDay::of($o->sold_at))
-    );
+    $isCorrected = fn ($o) => $o->wasCorrected();
     $cancelled = $this->orders->where('status', OrderStatus::Cancelled)->reject($isCorrected)->count();
     $openCount = $this->orders->where('status', OrderStatus::Open)->count();
     $isToday = $this->dayLabel === 'Hoy';
@@ -381,11 +400,11 @@ new #[Title('Ventas')] class extends Component
                                     <div class="flex flex-wrap justify-end gap-2">
                                         <button type="button" wire:click="editPayment({{ $order->id }})" class="btn">Cambiar forma de pago</button>
                                         <button type="button" class="btn"
-                                                @click="if (await $store.confirm.ask({ title: @js('¿Corregir la venta #'.$order->daily_number.'?'), message: 'Se cancela y el pedido se abre en Vender con todo, para agregar o quitar productos y cobrarlo de nuevo. Conserva su número y su lugar en la cocina.', action: 'Corregir', cancel: 'No', danger: false })) $wire.correct({{ $order->id }})">
+                                                @click="if (await $store.confirm.ask({ title: @js('¿Corregir la venta #'.$order->daily_number.'?'), message: 'La venta se cancela y el pedido se abre en Vender para que lo cambies y lo cobres de nuevo. Conserva su número y su lugar en la cocina.', action: 'Corregir', cancel: 'No', danger: false })) $wire.correct({{ $order->id }})">
                                             <x-icon name="pencil" class="size-4" /> Corregir pedido
                                         </button>
                                         <button type="button" class="btn-quiet-danger"
-                                                @click="if (await $store.confirm.ask({ title: @js('¿Cancelar la venta #'.$order->daily_number.'?'), message: 'Dejará de contar en ventas y en el corte. Si ya te pagaron, devuelve el dinero.', action: 'Cancelar venta', cancel: 'No' })) $wire.cancel({{ $order->id }})">
+                                                @click="if (await $store.confirm.ask({ title: @js('¿Cancelar la venta #'.$order->daily_number.'?'), message: 'Ya no contará en Ventas ni en el corte. Si el cliente ya pagó, recuerda devolverle su dinero.', action: 'Cancelar venta', cancel: 'No' })) $wire.cancel({{ $order->id }})">
                                             <x-icon name="x" class="size-4" /> Cancelar venta
                                         </button>
                                     </div>
@@ -436,7 +455,7 @@ new #[Title('Ventas')] class extends Component
                 <label class="label" for="pay-reference">Referencia <span class="font-normal text-muted">(opcional)</span></label>
                 <input id="pay-reference" type="text" wire:model="payReference" maxlength="255" class="input" placeholder="Folio o últimos dígitos">
             </div>
-            <p class="hint">El corte de hoy se ajusta solo: si cambia lo que entró en efectivo, revisa la caja.</p>
+            <p class="hint">El corte se actualiza solo. Si cambió el efectivo que entró, vuelve a contar la caja.</p>
         </form>
         <x-slot:footer>
             <button type="submit" form="payment-form" wire:loading.attr="disabled" wire:target="savePayment" class="btn-primary btn-lg w-full">Guardar forma de pago</button>

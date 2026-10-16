@@ -92,11 +92,7 @@ new #[Title('Corte de caja')] class extends Component
 
     protected function day(): CarbonImmutable
     {
-        try {
-            return CarbonImmutable::parse($this->date)->startOfDay();
-        } catch (Throwable) {
-            return BusinessDay::today();
-        }
+        return BusinessDay::parseDate($this->date) ?? BusinessDay::today();
     }
 
     #[Computed]
@@ -149,8 +145,19 @@ new #[Title('Corte de caja')] class extends Component
         return CashMovement::whereBetween('moved_at', [BusinessDay::start($day), BusinessDay::end($day)])->orderBy('moved_at')->get();
     }
 
+    protected function validateDate(): void
+    {
+        $this->validate(['date' => ['required', function ($attribute, $value, $fail) {
+            if (! BusinessDay::parseDate($value)) {
+                $fail('Elige una fecha de hoy o anterior.');
+            }
+        }]], ['date.required' => 'Elige una fecha válida.'], ['date' => 'fecha']);
+    }
+
     public function addMovement(): void
     {
+        $this->validateDate();
+
         $this->validate([
             'moveType' => ['required', 'in:in,out'],
             'moveAmount' => ['required', 'numeric', 'gt:0', 'max:9999999'],
@@ -175,7 +182,9 @@ new #[Title('Corte de caja')] class extends Component
 
     public function deleteMovement(int $id): void
     {
-        CashMovement::whereKey($id)->delete();
+        $this->validateDate();
+
+        CashMovement::whereKey($id)->whereBetween('moved_at', [BusinessDay::start($this->day()), BusinessDay::end($this->day())])->delete();
         $this->loadTotals();
         unset($this->movements);
     }
@@ -223,6 +232,8 @@ new #[Title('Corte de caja')] class extends Component
 
     public function save(): void
     {
+        $this->validateDate();
+
         $this->validate([
             'opening' => ['required', 'numeric', 'min:0', 'max:9999999'],
             'counted' => ['required', 'numeric', 'min:0', 'max:9999999'],
@@ -279,6 +290,7 @@ new #[Title('Corte de caja')] class extends Component
     </x-page-header>
 
     <div class="mx-auto max-w-xl space-y-4">
+        @error('date') <p class="error" role="alert">{{ $message }}</p> @enderror
         <section class="card !p-0">
             <dl class="divide-y divide-line">
                 <div class="flex items-center justify-between gap-4 px-4 py-3" data-tour="corte-fondo">
@@ -312,7 +324,7 @@ new #[Title('Corte de caja')] class extends Component
 
         <p x-show="expected < 0" x-cloak role="alert" class="flex gap-2 rounded-2xl bg-chile-soft px-4 py-3 text-sm text-chile">
             <x-icon name="alert" class="mt-0.5 size-4 shrink-0" />
-            <span>En la caja no puede haber menos de $0. Revisa el fondo inicial y que los gastos marcados como pagados con dinero de la caja <a href="{{ route('gastos') }}" wire:navigate class="font-semibold underline">en Gastos</a> sí hayan salido de ahí.</span>
+            <span>La caja no puede tener menos de $0. Revisa el fondo inicial y los gastos marcados «De la caja» en <a href="{{ route('gastos') }}" wire:navigate class="font-semibold underline">Gastos</a>.</span>
         </p>
 
         {{-- Lo pendiente es de ahora: no tiene caso avisarlo al revisar el corte de otro día. --}}
