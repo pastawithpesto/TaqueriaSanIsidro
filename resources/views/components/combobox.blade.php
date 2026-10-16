@@ -18,6 +18,7 @@
         options: @js($items),
         query: '',
         open: false,
+        up: false,
         active: 0,
         none: @js($none),
         create: @js($create),
@@ -38,8 +39,24 @@
             }
             return items;
         },
+        // Abre hacia arriba si abajo no cabe la lista (al fondo de un cuadro o de la pantalla).
+        place() {
+            const input = this.$refs.input.getBoundingClientRect();
+            let top = 0, bottom = window.innerHeight;
+            for (let el = this.$root.parentElement; el && el !== document.body; el = el.parentElement) {
+                if (['auto', 'scroll'].includes(getComputedStyle(el).overflowY)) {
+                    const box = el.getBoundingClientRect();
+                    top = Math.max(top, box.top);
+                    bottom = Math.min(bottom, box.bottom);
+                    break;
+                }
+            }
+            const below = bottom - input.bottom, above = input.top - top;
+            this.up = below < 250 && above > below;
+        },
         show() {
             if (this.open) return;
+            this.place();
             this.query = '';
             this.open = true;
             this.active = Math.max(0, this.items.findIndex(i => i.value == this.value && ! this.empty(i.value)));
@@ -60,7 +77,7 @@
      x-modelable="value" x-model="{{ $bind }}"
      @click.outside="close()"
      class="relative">
-    <input type="text" role="combobox" autocomplete="off" aria-autocomplete="list"
+    <input x-ref="input" type="text" role="combobox" autocomplete="off" aria-autocomplete="list"
            {{ $attributes->merge(['class' => 'input pr-10']) }}
            :value="open ? query : display"
            :placeholder="open && ! empty(value) ? display : @js($placeholder)"
@@ -76,8 +93,8 @@
     </button>
     <span x-show="empty(value) || open || none !== null" class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted"><x-icon name="down" class="size-4" /></span>
 
-    <ul x-show="open && items.length" x-cloak role="listbox"
-        class="absolute inset-x-0 top-full z-20 mt-1 max-h-60 min-w-48 overflow-y-auto rounded-xl border border-line bg-surface p-1 shadow-xl">
+    <ul x-show="open && items.length" x-cloak role="listbox" :class="up ? 'bottom-full mb-1' : 'top-full mt-1'"
+        class="absolute inset-x-0 z-20 max-h-60 min-w-48 overflow-y-auto rounded-xl border border-line bg-surface p-1 shadow-xl">
         <template x-for="(item, i) in items" :key="(item.create ? '+' : '') + item.value">
             {{-- mousedown en lugar de click: así no se pierde el foco antes de escoger. --}}
             <li role="option" :aria-selected="i === active" @mousedown.prevent="choose(item)" @mouseenter="active = i"
