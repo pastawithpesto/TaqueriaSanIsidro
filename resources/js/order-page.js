@@ -9,6 +9,7 @@ document.addEventListener('alpine:init', () => {
         cart: false,
         sending: false,
         errors: {},
+        telegramInit: '',
         form: { token: '', name: '', phone: '', service: 'togo', address: '', references: '', notes: '', website: '' },
 
         init() {
@@ -25,9 +26,30 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (e) {}
             if (!this.form.token) this.form.token = crypto.randomUUID();
+            this.startTelegram();
             if (!this.store.delivery && this.form.service === 'delivery') this.form.service = 'togo';
             this.$watch('lines', () => this.save());
             this.$watch('form', () => this.save());
+        },
+        /*
+         * Dentro de Telegram (Mini App) la página se abre con ?source=telegram. Solo entonces se carga el script
+         * de Telegram, para que quien entra por la web no le avise nada a nadie. Sus datos firmados viajan con el pedido
+         * y el servidor los comprueba: así sabe a qué chat avisarle.
+         */
+        startTelegram() {
+            if (!new URLSearchParams(location.search).has('source') && !location.hash.includes('tgWebAppData')) return;
+            const script = document.createElement('script');
+            script.src = 'https://telegram.org/js/telegram-web-app.js';
+            script.onload = () => {
+                const app = window.Telegram?.WebApp;
+                if (!app) return;
+                app.ready();
+                app.expand();
+                this.telegramInit = app.initData || '';
+                const first = app.initDataUnsafe?.user?.first_name;
+                if (first && !this.form.name) this.form.name = first;
+            };
+            document.head.appendChild(script);
         },
         save() {
             try {
@@ -171,7 +193,7 @@ document.addEventListener('alpine:init', () => {
                 choices: Object.values(l.choices),
             }));
             try {
-                const result = await this.$wire.place(lines, { ...this.form, expected_total: this.total() });
+                const result = await this.$wire.place(lines, { ...this.form, expected_total: this.total(), telegram_init: this.telegramInit });
                 if (result && !result.ok) {
                     this.errors = result.errors || {};
                     if (!Object.keys(this.errors).length) this.errors = { store: 'No pudimos mandar tu pedido. Inténtalo otra vez.' };

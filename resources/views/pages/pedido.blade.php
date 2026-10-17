@@ -34,34 +34,11 @@ new #[Layout('layouts::public')] #[Title('Tu pedido')] class extends Component
         return $order;
     }
 
-    /**
-     * En qué va el pedido, dicho para el cliente. "step" es el paso de la línea de tiempo (1 a 5); 0 si ya no avanza.
-     *
-     * @return array{key: string, step: int, title: string, text: string, tone: string}
-     */
+    /** En qué va el pedido, dicho para el cliente (el mismo texto que usa el bot de Telegram). */
     #[Computed]
     public function stage(): array
     {
-        $order = $this->order;
-        $delivery = $order->isDelivery();
-
-        if ($order->status === OrderStatus::Cancelled) {
-            if ($order->cancel_reason === Order::CUSTOMER_CANCELLED) {
-                return ['key' => 'customer-cancelled', 'step' => 0, 'title' => 'Cancelaste tu pedido', 'text' => 'No hay nada que pagar. Cuando quieras, puedes hacer otro.', 'tone' => 'muted'];
-            }
-
-            return $order->accepted_at
-                ? ['key' => 'cancelled', 'step' => 0, 'title' => 'Tu pedido se canceló', 'text' => ($order->cancel_reason && $order->cancel_reason !== Order::CORRECTION ? $order->cancel_reason.'. ' : '').'Si tienes dudas, comunícate con la taquería.', 'tone' => 'bad']
-                : ['key' => 'rejected', 'step' => 0, 'title' => 'No pudimos aceptar tu pedido', 'text' => ($order->cancel_reason ?: 'La taquería no pudo atenderlo en este momento').'. Perdón por la molestia; puedes intentar de nuevo más tarde.', 'tone' => 'bad'];
-        }
-
-        return match (true) {
-            $order->status === OrderStatus::Requested => ['key' => 'requested', 'step' => 1, 'title' => 'Recibimos tu pedido', 'text' => 'Esperando a que la taquería lo acepte. Deja esta página abierta: aquí mismo te avisamos.', 'tone' => 'wait'],
-            $order->delivered_at !== null => ['key' => 'delivered', 'step' => 5, 'title' => $delivery ? 'Tu pedido fue entregado' : 'Tu pedido fue entregado', 'text' => 'Gracias por tu pedido. ¡Buen provecho!', 'tone' => 'good'],
-            $order->dispatched_at !== null => ['key' => 'on-the-way', 'step' => 4, 'title' => 'Tu pedido va en camino', 'text' => 'Ya salió del puesto. Ten tu dinero listo para pagar al recibirlo.', 'tone' => 'good'],
-            $order->ready_at !== null => ['key' => 'ready', 'step' => 4, 'title' => $delivery ? 'Tu pedido está listo' : '¡Tu pedido está listo!', 'text' => $delivery ? 'En un momento sale con el repartidor.' : 'Pasa a recogerlo y paga en el puesto.', 'tone' => 'good'],
-            default => ['key' => 'preparing', 'step' => 3, 'title' => 'Tu pedido fue aceptado', 'text' => 'Lo estamos preparando.', 'tone' => 'good'],
-        };
+        return $this->order->customerStage();
     }
 
     /** Los pasos que ve el cliente, en orden. */
@@ -172,6 +149,14 @@ new #[Layout('layouts::public')] #[Title('Tu pedido')] class extends Component
 
         @if ($order->status === OrderStatus::Requested)
             <button type="button" class="btn w-full" @click="if (await $store.confirm.ask({ title: '¿Cancelar tu pedido?', message: 'Todavía no lo han aceptado, así que no pasa nada.', action: 'Cancelar pedido', cancel: 'No' })) $wire.cancel()">Cancelar mi pedido</button>
+        @endif
+
+        @if (\App\Support\Telegram::enabled() && $order->status === OrderStatus::Requested || \App\Support\Telegram::enabled() && in_array($this->stage['key'], ['preparing', 'ready', 'on-the-way'], true))
+            @if ($order->telegram_chat_id)
+                <p class="text-center text-[15px] text-muted">Te avisamos de cada paso por Telegram.</p>
+            @elseif ($link = \App\Support\Telegram::orderLink($token))
+                <a href="{{ $link }}" target="_blank" rel="noopener" class="btn w-full" data-telegram-link>Recibir avisos por Telegram</a>
+            @endif
         @endif
 
         @if ($phone = \App\Support\Store::phone())

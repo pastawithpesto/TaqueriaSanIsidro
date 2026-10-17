@@ -2,7 +2,11 @@
 
 namespace App\Providers;
 
+use App\Events\OnlineOrderPlaced;
+use App\Events\OnlineOrderUpdated;
+use App\Support\TelegramNotifier;
 use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Number;
 use Illuminate\Support\ServiceProvider;
@@ -22,6 +26,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Avisos por Telegram: corren al confirmarse el pedido y, si el bot falla, no afectan al pedido.
+        Event::listen(OnlineOrderPlaced::class, fn (OnlineOrderPlaced $event) => TelegramNotifier::placed($event->order));
+        Event::listen(OnlineOrderUpdated::class, fn (OnlineOrderUpdated $event) => TelegramNotifier::updated($event->order));
+
         Number::useLocale('es_MX');
         Number::useCurrency('MXN');
 

@@ -96,6 +96,16 @@ Contra pedidos falsos: nombre y teléfono obligatorios, límite de pedidos por e
 - **Datos de los clientes.** El enlace de seguimiento deja de funcionar 24 horas después de que el pedido termina. El teléfono y la dirección de un pedido en línea se borran a los 60 días (se conserva el nombre y lo vendido). Los pedidos que nadie acepta ni rechaza se cancelan solos a los 90 minutos. El token del enlace no se guarda en los registros de acceso de nginx.
 - **Límites.** Por equipo: 5 pedidos cada 10 minutos y 30 intentos; por teléfono: 3 por hora; entre todos: 40 cada 10 minutos y 25 pedidos esperando respuesta a la vez.
 
+## Bot de Telegram
+
+Crea un bot con `/newbot` en **@BotFather** y pega su token en **Tienda en línea** del sistema. Para vincular el Telegram del taquero, genera ahí un código y envía `/vincular CODIGO` al bot.
+
+En producción se requiere una URL pública con **HTTPS**: el webhook usa una clave secreta y se registra con el botón del sistema o con `php artisan telegram:webhook`. Para quitarlo sin perder mensajes pendientes: `php artisan telegram:webhook --delete`.
+
+En desarrollo, conecta primero el bot y ejecuta `docker compose --profile telegram up -d` para levantar la consulta de mensajes y el programador. También puedes ejecutar `php artisan telegram:poll` directamente, junto con `php artisan schedule:work`. La consulta quita el webhook mientras está en uso; al volver a producción, regístralo otra vez. Usa un bot distinto para desarrollo si producción sigue activa.
+
+El botón **Pedir** y el comando `/pedido` abren la página de pedidos dentro de Telegram como Mini App, que también requiere HTTPS. El servicio `scheduler` es necesario para los recordatorios, el resumen al cerrar por horario y la caducidad de pedidos; en producción se levanta siempre y en desarrollo pertenece al perfil `telegram`.
+
 ## Comandos útiles
 
 ```sh

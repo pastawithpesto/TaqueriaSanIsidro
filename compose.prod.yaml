@@ -74,7 +74,22 @@ services:
     image: taqueria-app:latest
     restart: unless-stopped
     command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
-    environment: *app-environment
+    environment: &console-environment
+      <<: *app-environment
+      RUN_MIGRATIONS: "false"
+    volumes:
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - taqueria
+
+  scheduler:
+    image: taqueria-app:latest
+    restart: unless-stopped
+    command: ["php", "artisan", "schedule:work"]
+    environment: *console-environment
     volumes:
       - storage:/var/www/html/storage
     depends_on:

@@ -2,6 +2,7 @@
 
 use App\Models\Setting;
 use App\Support\Store;
+use App\Support\Telegram;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -23,6 +24,12 @@ new #[Title('Tienda en línea')] class extends Component
 
     /** @var array<string, array{open: bool, from: string, to: string}> */
     public array $schedule = [];
+
+    /** El token que se pega para conectar el bot; se borra apenas se usa y nunca se vuelve a mostrar. */
+    public string $telegramToken = '';
+
+    /** Código para vincular el Telegram del taquero; vale 10 minutos. */
+    public ?string $linkCode = null;
 
     public bool $mpEnabled = false;
 
@@ -70,6 +77,95 @@ new #[Title('Tienda en línea')] class extends Component
     public function hasWebhookSecret(): bool
     {
         return Store::secret('mp_webhook_secret') !== null;
+    }
+
+    /** Cómo está el bot de Telegram, sin secretos. */
+    #[Computed]
+    public function telegram(): array
+    {
+        return [
+            'connected' => Telegram::token() !== null,
+            'enabled' => Telegram::enabled(),
+            'username' => Telegram::username(),
+            'staff' => Telegram::staffChats(),
+            'canUseWebhook' => Telegram::canUseWebhook(),
+            'webhookUrl' => Telegram::webhookUrl(),
+        ];
+    }
+
+    public function connectTelegram(): void
+    {
+        $this->telegramToken = trim($this->telegramToken);
+        $this->validate(
+            ['telegramToken' => ['required', 'regex:/^\d{6,12}:[A-Za-z0-9_-]{30,50}$/']],
+            ['telegramToken.required' => 'Pega el token que te dio BotFather.', 'telegramToken.regex' => 'Ese token no tiene el formato de BotFather: números, dos puntos y letras.'],
+        );
+
+        if (! Telegram::connect($this->telegramToken)) {
+            $this->addError('telegramToken', 'Telegram no aceptó ese token. Revisa que lo copiaste completo desde BotFather.');
+
+            return;
+        }
+
+        $this->telegramToken = '';
+        unset($this->telegram);
+
+        if (! Telegram::canUseWebhook()) {
+            $this->dispatch('toast', message: 'Bot conectado. Con esta dirección (sin https) usa el comando telegram:poll para recibir mensajes.');
+
+            return;
+        }
+
+        $registered = Telegram::register();
+        $this->dispatch('toast', message: $registered ? 'Bot conectado y webhook registrado.' : 'Bot conectado, pero Telegram no aceptó el webhook. Toca Registrar de nuevo.', type: $registered ? 'success' : 'error');
+    }
+
+    public function registerTelegram(): void
+    {
+        unset($this->telegram);
+
+        if (! Telegram::canUseWebhook()) {
+            $this->dispatch('toast', message: 'Telegram solo manda mensajes a direcciones https. En desarrollo usa telegram:poll.', type: 'error');
+
+            return;
+        }
+
+        $registered = Telegram::register();
+        $this->dispatch('toast', message: $registered ? 'Webhook registrado.' : 'Telegram no aceptó el webhook. Revisa el token.', type: $registered ? 'success' : 'error');
+    }
+
+    public function toggleTelegram(): void
+    {
+        Setting::put('telegram_enabled', Telegram::enabled() ? '0' : '1');
+        unset($this->telegram);
+        $this->dispatch('toast', message: Telegram::enabled() ? 'Bot encendido.' : 'Bot apagado: ya no contesta ni manda avisos.');
+    }
+
+    public function newLinkCode(): void
+    {
+        $this->linkCode = Telegram::newLinkCode();
+    }
+
+    public function removeStaffChat(string $id): void
+    {
+        Telegram::removeStaff($id);
+        unset($this->telegram);
+        $this->dispatch('toast', message: 'Ese chat ya no recibe pedidos.');
+    }
+
+    public function testTelegram(): void
+    {
+        $sent = collect(Telegram::staffChats())->filter(fn ($chat) => Telegram::send((int) $chat['id'], 'Mensaje de prueba de '.Telegram::esc(\App\Support\Branding::name()).'. Si lo ves, los avisos de pedidos llegan a este chat.') !== null)->count();
+
+        $this->dispatch('toast', message: $sent ? 'Mensaje de prueba enviado.' : 'No se pudo enviar. Revisa que haya un chat vinculado y que el bot esté encendido.', type: $sent ? 'success' : 'error');
+    }
+
+    public function disconnectTelegram(): void
+    {
+        Telegram::disconnect();
+        $this->linkCode = null;
+        unset($this->telegram);
+        $this->dispatch('toast', message: 'Bot desconectado.');
     }
 
     public function setMode(string $mode): void
@@ -331,6 +427,82 @@ new #[Title('Tienda en línea')] class extends Component
                 @endforeach
                 <button type="submit" class="btn-primary">Guardar horario</button>
             </form>
+        </section>
+
+        {{-- Telegram --}}
+        @php $tg = $this->telegram; @endphp
+        <section class="card space-y-4" data-tour="tienda-telegram">
+            <div>
+                <h2 class="section-title">Bot de Telegram</h2>
+                <p class="text-sm text-muted">Los clientes piden desde Telegram (el menú se abre dentro del chat) y tú recibes los pedidos con botones para aceptarlos o rechazarlos.</p>
+            </div>
+
+            @if (! $tg['connected'])
+                <ol class="list-decimal space-y-1 pl-5 text-sm text-muted">
+                    <li>En Telegram abre <span class="font-semibold text-ink">@BotFather</span> y escribe <span class="font-semibold text-ink">/newbot</span>.</li>
+                    <li>Elige un nombre y un usuario para el bot.</li>
+                    <li>Copia el token que te da y pégalo aquí.</li>
+                </ol>
+                <form wire:submit="connectTelegram" class="space-y-2">
+                    <label class="label" for="tg-token">Token del bot</label>
+                    <input id="tg-token" type="password" wire:model="telegramToken" autocomplete="new-password" class="input" placeholder="123456789:AAH...">
+                    @error('telegramToken') <p class="error">{{ $message }}</p> @enderror
+                    <p class="hint">Se guarda cifrado y no se vuelve a mostrar.</p>
+                    <button type="submit" class="btn-primary" wire:loading.attr="disabled" wire:target="connectTelegram">Conectar bot</button>
+                </form>
+            @else
+                <div class="flex items-center gap-3 rounded-xl bg-sunken px-4 py-3">
+                    <span @class(['size-3 shrink-0 rounded-full', 'bg-salsa' => $tg['enabled'], 'bg-chile' => ! $tg['enabled']])></span>
+                    <div class="min-w-0 flex-1">
+                        <p class="font-semibold">
+                            @if ($tg['username'])
+                                <a href="https://t.me/{{ $tg['username'] }}" target="_blank" rel="noopener" class="underline">{{ '@'.$tg['username'] }}</a>
+                            @else
+                                Bot conectado
+                            @endif
+                        </p>
+                        <p class="text-sm text-muted">{{ $tg['enabled'] ? 'Encendido: contesta y manda avisos.' : 'Apagado: no contesta ni manda avisos.' }}</p>
+                    </div>
+                    <input type="checkbox" class="switch" @checked($tg['enabled']) wire:click="toggleTelegram" aria-label="Encender el bot">
+                </div>
+
+                @unless ($tg['canUseWebhook'])
+                    <p class="hint">Esta dirección no es https, así que Telegram no puede mandarle mensajes. Para probar en tu computadora corre <span class="font-semibold text-ink">php artisan telegram:poll</span>; en producción se registra solo.</p>
+                @else
+                    <button type="button" wire:click="registerTelegram" class="btn">Registrar webhook de nuevo</button>
+                @endunless
+
+                <div class="space-y-3">
+                    <h3 class="font-semibold">Tu Telegram (para recibir los pedidos)</h3>
+                    @forelse ($tg['staff'] as $chat)
+                        <div wire:key="staff-{{ $chat['id'] }}" class="flex items-center gap-3 rounded-xl border border-line px-4 py-2.5">
+                            <span class="min-w-0 flex-1 truncate font-semibold">{{ $chat['name'] }}</span>
+                            <button type="button" wire:click="removeStaffChat('{{ $chat['id'] }}')" class="btn-quiet text-chile">Quitar</button>
+                        </div>
+                    @empty
+                        <p class="text-sm text-muted">Todavía no hay ningún chat vinculado, así que los pedidos no te llegan por Telegram.</p>
+                    @endforelse
+
+                    @if ($linkCode)
+                        <div class="space-y-1 rounded-xl bg-limon-soft px-4 py-3">
+                            <p class="text-sm">Abre el bot en Telegram y escribe:</p>
+                            <p class="num text-2xl font-bold select-all">/vincular {{ $linkCode }}</p>
+                            <p class="hint">El código vale 10 minutos y se usa una sola vez. También sirve en un grupo donde hayas agregado al bot.</p>
+                        </div>
+                    @endif
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" wire:click="newLinkCode" class="btn">{{ $tg['staff'] === [] ? 'Vincular mi Telegram' : 'Vincular otro chat' }}</button>
+                        @if ($tg['staff'])
+                            <button type="button" wire:click="testTelegram" class="btn">Enviar mensaje de prueba</button>
+                        @endif
+                    </div>
+                </div>
+
+                <div class="border-t border-line pt-3">
+                    <button type="button" class="btn-quiet text-chile"
+                            @click="if (await $store.confirm.ask({ title: '¿Desconectar el bot?', message: 'Se quita el token y los chats vinculados, y el bot deja de contestar.', action: 'Desconectar' })) $wire.disconnectTelegram()">Desconectar bot</button>
+                </div>
+            @endif
         </section>
 
         {{-- Mercado Pago --}}

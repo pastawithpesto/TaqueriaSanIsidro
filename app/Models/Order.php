@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['source', 'customer_phone', 'public_token', 'accepted_at', 'operation_token', 'replaces_order_id', 'user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
+#[Fillable(['source', 'customer_phone', 'telegram_chat_id', 'public_token', 'accepted_at', 'operation_token', 'replaces_order_id', 'user_id', 'daily_number', 'status', 'label', 'service', 'delivery_address', 'delivery_phone', 'delivery_notes', 'payment_method', 'payment_reference', 'total', 'packaging_fee', 'delivery_fee', 'discount', 'tip', 'notes', 'sold_at', 'pickup_at', 'paid_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at', 'cancel_reason', 'changed_at'])]
 class Order extends Model
 {
     protected static function booted(): void
@@ -95,6 +95,34 @@ class Order extends Model
     public function scopeRequested(Builder $query): void
     {
         $query->where('status', OrderStatus::Requested);
+    }
+
+    /**
+     * En qué va un pedido en línea, dicho para el cliente. "step" es el paso de la línea de tiempo (1 a 5); 0 si ya no avanza.
+     *
+     * @return array{key: string, step: int, title: string, text: string, tone: string}
+     */
+    public function customerStage(): array
+    {
+        $delivery = $this->isDelivery();
+
+        if ($this->status === OrderStatus::Cancelled) {
+            if ($this->cancel_reason === self::CUSTOMER_CANCELLED) {
+                return ['key' => 'customer-cancelled', 'step' => 0, 'title' => 'Cancelaste tu pedido', 'text' => 'No hay nada que pagar. Cuando quieras, puedes hacer otro.', 'tone' => 'muted'];
+            }
+
+            return $this->accepted_at
+                ? ['key' => 'cancelled', 'step' => 0, 'title' => 'Tu pedido se canceló', 'text' => ($this->cancel_reason && $this->cancel_reason !== self::CORRECTION ? $this->cancel_reason.'. ' : '').'Si tienes dudas, comunícate con la taquería.', 'tone' => 'bad']
+                : ['key' => 'rejected', 'step' => 0, 'title' => 'No pudimos aceptar tu pedido', 'text' => ($this->cancel_reason ?: 'La taquería no pudo atenderlo en este momento').'. Perdón por la molestia; puedes intentar de nuevo más tarde.', 'tone' => 'bad'];
+        }
+
+        return match (true) {
+            $this->status === OrderStatus::Requested => ['key' => 'requested', 'step' => 1, 'title' => 'Recibimos tu pedido', 'text' => 'Esperando a que la taquería lo acepte. Deja esta página abierta: aquí mismo te avisamos.', 'tone' => 'wait'],
+            $this->delivered_at !== null => ['key' => 'delivered', 'step' => 5, 'title' => 'Tu pedido fue entregado', 'text' => 'Gracias por tu pedido. ¡Buen provecho!', 'tone' => 'good'],
+            $this->dispatched_at !== null => ['key' => 'on-the-way', 'step' => 4, 'title' => 'Tu pedido va en camino', 'text' => 'Ya salió del puesto. Ten tu dinero listo para pagar al recibirlo.', 'tone' => 'good'],
+            $this->ready_at !== null => ['key' => 'ready', 'step' => 4, 'title' => $delivery ? 'Tu pedido está listo' : '¡Tu pedido está listo!', 'text' => $delivery ? 'En un momento sale con el repartidor.' : 'Pasa a recogerlo y paga en el puesto.', 'tone' => 'good'],
+            default => ['key' => 'preparing', 'step' => 3, 'title' => 'Tu pedido fue aceptado', 'text' => 'Lo estamos preparando.', 'tone' => 'good'],
+        };
     }
 
     /** El enlace de seguimiento deja de funcionar un día después de que el pedido terminó (entregado o cancelado). */

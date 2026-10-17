@@ -74,6 +74,9 @@ class OnlineOrder
         self::assertOpen();
         self::expireStale();
 
+        // Si el pedido se hizo dentro de Telegram, sus datos firmados dicen a qué chat avisarle (no se confía en lo que diga el navegador).
+        $telegramChat = Telegram::enabled() ? (Telegram::verifyInitData(is_string($input['telegram_init'] ?? null) ? $input['telegram_init'] : null)['id'] ?? null) : null;
+
         $name = Names::clean(is_scalar($input['name'] ?? null) ? (string) $input['name'] : '');
         $phone = self::normalizePhone(is_scalar($input['phone'] ?? null) ? (string) $input['phone'] : '');
         $service = $input['service'] ?? null;
@@ -133,7 +136,7 @@ class OnlineOrder
 
         // Revisar cupos, contar el intento y crear el pedido va junto y de uno en uno: si no, dos pedidos a la vez pasarían los límites.
         try {
-            $order = Cache::lock('online-order-admission', 10)->block(5, function () use ($ip, $phone, $token, $name, $service, $address, $references, $notes, $built) {
+            $order = Cache::lock('online-order-admission', 10)->block(5, function () use ($ip, $phone, $token, $name, $service, $address, $references, $notes, $built, $telegramChat) {
                 if (Order::requested()->count() >= self::MAX_WAITING) {
                     throw ValidationException::withMessages(['store' => 'Hay muchos pedidos esperando respuesta. Inténtalo de nuevo en unos minutos.']);
                 }
@@ -141,12 +144,12 @@ class OnlineOrder
                 self::throttle($ip, $phone);
 
                 try {
-                    return self::create($token, $name, $phone, $service, $address, $references, $notes, $built);
+                    return self::create($token, $name, $phone, $service, $address, $references, $notes, $built, $telegramChat);
                 } catch (UniqueConstraintViolationException) {
                     // El mismo formulario llegó dos veces: gana el primero y el otro recibe ese mismo pedido.
                     $existing = $token ? Order::where('operation_token', $token)->where('source', 'online')->first() : null;
 
-                    return $existing ?? self::create(null, $name, $phone, $service, $address, $references, $notes, $built);
+                    return $existing ?? self::create(null, $name, $phone, $service, $address, $references, $notes, $built, $telegramChat);
                 }
             });
         } catch (LockTimeoutException) {
@@ -159,9 +162,9 @@ class OnlineOrder
     }
 
     /** @param  array<string, mixed>  $built */
-    protected static function create(?string $token, string $name, ?string $phone, string $service, string $address, string $references, string $notes, array $built): Order
+    protected static function create(?string $token, string $name, ?string $phone, string $service, string $address, string $references, string $notes, array $built, ?int $telegramChat = null): Order
     {
-        return DB::transaction(function () use ($token, $name, $phone, $service, $address, $references, $notes, $built) {
+        return DB::transaction(function () use ($token, $name, $phone, $service, $address, $references, $notes, $built, $telegramChat) {
             $delivery = $service === 'delivery';
             $order = Order::create([
                 'source' => 'online',
@@ -170,6 +173,7 @@ class OnlineOrder
                 'public_token' => (string) Str::uuid(),
                 'label' => $name,
                 'customer_phone' => $phone,
+                'telegram_chat_id' => $telegramChat,
                 'service' => $service,
                 'delivery_address' => $delivery ? $address : null,
                 'delivery_phone' => $delivery ? $phone : null,
