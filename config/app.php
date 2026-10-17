@@ -80,7 +80,7 @@ return [
 
     'admin_path' => (function () {
         $path = strtolower(trim((string) env('ADMIN_PATH', 'admon'), '/'));
-        $reserved = ['livewire', 'up', 'brand', 'pedido', 'pedir', 'build', 'storage', 'api'];
+        $reserved = ['livewire', 'up', 'brand', 'pedido', 'pedir', 'build', 'storage', 'api', 'app', 'apps', 'broadcasting', 'mercadopago'];
 
         return preg_match('/^[a-z0-9-]+$/', $path) && ! in_array($path, $reserved, true) ? $path : 'admon';
     })(),

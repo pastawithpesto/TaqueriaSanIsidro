@@ -23,6 +23,8 @@ new #[Title('Pedidos')] class extends Component
     #[Computed]
     public function requested()
     {
+        OnlineOrder::expireStale();
+
         return Order::with('items')->requested()->orderBy('created_at')->get();
     }
 

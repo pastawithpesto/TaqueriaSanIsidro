@@ -116,7 +116,7 @@ new #[Title('Ventas')] class extends Component
     public function restore(int $id): void
     {
         DB::transaction(function () use ($id) {
-            $order = Order::where('status', OrderStatus::Cancelled)->whereKey($id)->lockForUpdate()->first();
+            $order = Order::where('status', OrderStatus::Cancelled)->accepted()->whereKey($id)->lockForUpdate()->first();
 
             if (! $order) {
                 $this->dispatch('toast', message: 'La venta cambió en otro dispositivo. Recarga la página.', type: 'error');

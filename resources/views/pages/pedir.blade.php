@@ -8,6 +8,7 @@ use App\Support\Store;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Renderless;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -63,6 +64,7 @@ new #[Layout('layouts::public')] #[Title('Haz tu pedido')] class extends Compone
      * @param  array<string, mixed>  $form
      * @return array{ok: bool, errors?: array<string, string>}
      */
+    #[Renderless]
     public function place(array $lines, array $form): array
     {
         // Campo trampa: las personas no lo ven, así que si trae algo es un programa.
@@ -307,6 +309,11 @@ new #[Layout('layouts::public')] #[Title('Haz tu pedido')] class extends Compone
                 </dl>
                 <p class="hint">Pagas cuando {{ '' }}<span x-text="form.service === 'delivery' ? 'te lo entregamos' : 'recoges tu pedido'"></span>. La taquería primero confirma tu pedido y aquí mismo verás si lo aceptó.</p>
                 <p class="error" x-show="errors.store" x-text="errors.store" x-cloak></p>
+                <div x-show="errors.prices" x-cloak class="space-y-2">
+                    <p class="error" x-text="errors.prices"></p>
+                    {{-- El menú se carga una vez: para ver los precios nuevos hay que volver a leerlo. El borrador del pedido se conserva. --}}
+                    <button type="button" class="btn w-full" @click="location.reload()">Actualizar precios</button>
+                </div>
             </div>
             <x-slot:footer>
                 <button type="button" class="btn-primary btn-lg w-full disabled:opacity-60" :disabled="sending" @click="submit()">

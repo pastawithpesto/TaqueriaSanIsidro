@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light dark">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffd34d">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#231c17">
     <link rel="icon" href="{{ Branding::logoUrl(64) }}" type="image/png">

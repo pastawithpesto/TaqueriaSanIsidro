@@ -11,7 +11,9 @@ class Names
     /** Quita caracteres de control o invisibles y deja un solo espacio entre palabras. */
     public static function clean(?string $name): string
     {
-        $name = preg_replace('/[\p{Cc}\p{Cf}]/u', '', (string) $name) ?? '';
+        // Tabuladores y saltos de línea separan palabras: se vuelven espacio antes de quitar el resto de los invisibles.
+        $name = preg_replace('/[\t\n\r\x0B\f]+/u', ' ', (string) $name) ?? '';
+        $name = preg_replace('/[\p{Cc}\p{Cf}]/u', '', $name) ?? '';
 
         return trim(preg_replace('/\s+/u', ' ', $name) ?? '');
     }

@@ -97,6 +97,14 @@ class Order extends Model
         $query->where('status', OrderStatus::Requested);
     }
 
+    /** El enlace de seguimiento deja de funcionar un día después de que el pedido terminó (entregado o cancelado). */
+    public function isTrackingExpired(): bool
+    {
+        $ended = $this->delivered_at ?? $this->cancelled_at;
+
+        return $ended !== null && $ended->lt(now()->subDay());
+    }
+
     public function isOnline(): bool
     {
         return $this->source === 'online';

@@ -89,6 +89,13 @@ En el sistema, **Tienda en línea** controla: el estado (según horario, abierta
 
 Contra pedidos falsos: nombre y teléfono obligatorios, límite de pedidos por equipo y por teléfono, campo trampa para programas y aceptación manual de cada pedido. La integración de cobro con Mercado Pago queda pendiente: las credenciales ya se guardan (cifradas), pero todavía no cobra.
 
+### Seguridad de los pedidos en línea (para producción)
+
+- **IP del cliente.** Los límites de pedidos por equipo usan la IP que ve Laravel. Con `TRUSTED_PROXIES=*` (valor por defecto) se confía en cualquier proxy; si tu proxy exterior (Nginx Proxy Manager) añade a `X-Forwarded-For` en vez de reemplazarlo, alguien podría falsear su IP y saltarse solo el límite por equipo (siguen los límites por teléfono, global y de pedidos esperando, y cada pedido se acepta a mano). Lo mejor es poner en `TRUSTED_PROXIES` la IP o red del proxy real.
+- **Reverb.** `REVERB_APP_ID`, `REVERB_APP_KEY` y `REVERB_APP_SECRET` deben ser cadenas largas y aleatorias (no uses los valores del ejemplo). `REVERB_ALLOWED_ORIGINS` limita los orígenes de WebSocket (en producción, por defecto `taqueria.revmnds.com`; cámbialo si usas otro dominio). La API HTTP de Reverb (`/apps`) no se publica: solo `/app/` pasa por el proxy.
+- **Datos de los clientes.** El enlace de seguimiento deja de funcionar 24 horas después de que el pedido termina. El teléfono y la dirección de un pedido en línea se borran a los 60 días (se conserva el nombre y lo vendido). Los pedidos que nadie acepta ni rechaza se cancelan solos a los 90 minutos. El token del enlace no se guarda en los registros de acceso de nginx.
+- **Límites.** Por equipo: 5 pedidos cada 10 minutos y 30 intentos; por teléfono: 3 por hora; entre todos: 40 cada 10 minutos y 25 pedidos esperando respuesta a la vez.
+
 ## Comandos útiles
 
 ```sh

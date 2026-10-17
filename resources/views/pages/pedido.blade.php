@@ -19,13 +19,19 @@ new #[Layout('layouts::public')] #[Title('Tu pedido')] class extends Component
     public function mount(string $token): void
     {
         $this->token = $token;
-        abort_unless(Order::where('public_token', $token)->where('source', 'online')->exists(), 404);
+        $order = Order::where('public_token', $token)->where('source', 'online')->first();
+        abort_if(! $order || $order->isTrackingExpired(), 404);
     }
 
     #[Computed]
     public function order(): Order
     {
-        return Order::with('items')->where('public_token', $this->token)->where('source', 'online')->firstOrFail();
+        OnlineOrder::expireStale();
+
+        $order = Order::with('items')->where('public_token', $this->token)->where('source', 'online')->firstOrFail();
+        abort_if($order->isTrackingExpired(), 404);
+
+        return $order;
     }
 
     /**

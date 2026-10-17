@@ -13,7 +13,9 @@ document.addEventListener('alpine:init', () => {
 
         init() {
             try {
-                const saved = JSON.parse(localStorage.getItem('pedir:borrador') || 'null');
+                let saved = JSON.parse(localStorage.getItem('pedir:borrador') || 'null');
+                // El borrador guarda nombre y teléfono: a los 30 días se descarta.
+                if (saved && Date.now() - (saved.savedAt || 0) > 30 * 86400000) saved = null;
                 if (saved) {
                     this.form = { ...this.form, ...saved.form, website: '' };
                     // Solo se recuperan líneas de productos que siguen en el menú.
@@ -32,6 +34,7 @@ document.addEventListener('alpine:init', () => {
                 localStorage.setItem(
                     'pedir:borrador',
                     JSON.stringify({
+                        savedAt: Date.now(),
                         form: { ...this.form, website: '' },
                         lines: this.lines.map(({ product, ...rest }) => rest),
                     }),
@@ -168,7 +171,7 @@ document.addEventListener('alpine:init', () => {
                 choices: Object.values(l.choices),
             }));
             try {
-                const result = await this.$wire.place(lines, { ...this.form });
+                const result = await this.$wire.place(lines, { ...this.form, expected_total: this.total() });
                 if (result && !result.ok) {
                     this.errors = result.errors || {};
                     if (!Object.keys(this.errors).length) this.errors = { store: 'No pudimos mandar tu pedido. Inténtalo otra vez.' };
@@ -178,7 +181,7 @@ document.addEventListener('alpine:init', () => {
                 try {
                     localStorage.setItem(
                         'pedir:borrador',
-                        JSON.stringify({ form: { name: this.form.name, phone: this.form.phone, service: this.form.service }, lines: [] }),
+                        JSON.stringify({ savedAt: Date.now(), form: { name: this.form.name, phone: this.form.phone, service: this.form.service }, lines: [] }),
                     );
                 } catch (e) {}
             } catch (e) {

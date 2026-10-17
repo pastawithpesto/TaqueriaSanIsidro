@@ -6,7 +6,10 @@ use App\Enums\OrderStatus;
 use App\Events\OnlineOrderPlaced;
 use App\Events\OnlineOrderUpdated;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\Setting;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
@@ -28,6 +31,20 @@ class OnlineOrder
 
     public const LIMIT_PER_PHONE = 3;
 
+    /** Intentos (buenos o malos) por equipo en 10 minutos: cada intento cuesta consultas, así que también se limitan. */
+    public const LIMIT_ATTEMPTS = 30;
+
+    /** Entre todos los clientes: pedidos nuevos en 10 minutos y pedidos esperando respuesta a la vez. */
+    public const LIMIT_GLOBAL = 40;
+
+    public const MAX_WAITING = 25;
+
+    /** Un pedido que nadie acepta ni rechaza en este tiempo se cancela solo y el cliente lo ve. */
+    public const EXPIRE_MINUTES = 90;
+
+    /** Días que se guardan teléfono y dirección de un pedido en línea. */
+    public const KEEP_CONTACT_DAYS = 60;
+
     /** Motivos que el taquero elige con un toque al rechazar. */
     public const REJECT_REASONS = [
         'Se acabó algún producto',
@@ -48,11 +65,14 @@ class OnlineOrder
     {
         $token = is_string($input['token'] ?? null) && Str::isUuid($input['token']) ? $input['token'] : null;
 
-        if ($token && $existing = Order::where('operation_token', $token)->first()) {
+        // Solo se reconoce un envío repetido de un pedido en línea; un token de otra clase de pedido no devuelve nada.
+        if ($token && $existing = Order::where('operation_token', $token)->where('source', 'online')->first()) {
             return $existing;
         }
 
+        self::throttleAttempts($ip);
         self::assertOpen();
+        self::expireStale();
 
         $name = Names::clean(is_scalar($input['name'] ?? null) ? (string) $input['name'] : '');
         $phone = self::normalizePhone(is_scalar($input['phone'] ?? null) ? (string) $input['phone'] : '');
@@ -98,9 +118,50 @@ class OnlineOrder
             throw ValidationException::withMessages(['lines' => 'Agrega algo a tu pedido.']);
         }
 
-        self::throttle($ip, $phone);
+        $soldOut = Product::whereIn('id', array_column($built['items'], 'product_id'))->get()->filter(fn (Product $p) => $p->isSoldOut())->pluck('name');
+        if ($soldOut->isNotEmpty()) {
+            throw ValidationException::withMessages(['lines' => 'Se acabó hoy: '.$soldOut->join(', ', ' y ').'. Quítalo de tu pedido.']);
+        }
 
-        $order = DB::transaction(function () use ($token, $name, $phone, $service, $address, $references, $notes, $built) {
+        // Si algún precio cambió mientras el cliente armaba su pedido, se le avisa en vez de cobrarle otra cosa.
+        $expected = $input['expected_total'] ?? null;
+        $total = round($built['total'] + (float) Setting::value('packaging_fee', '0') + ($service === 'delivery' ? (float) Setting::value('delivery_fee', '0') : 0), 2);
+
+        if (is_numeric($expected) && abs((float) $expected - $total) > 0.009) {
+            throw ValidationException::withMessages(['prices' => 'Algunos precios cambiaron mientras armabas tu pedido. Vamos a actualizar el menú: revisa el total y vuelve a enviarlo.']);
+        }
+
+        // Revisar cupos, contar el intento y crear el pedido va junto y de uno en uno: si no, dos pedidos a la vez pasarían los límites.
+        try {
+            $order = Cache::lock('online-order-admission', 10)->block(5, function () use ($ip, $phone, $token, $name, $service, $address, $references, $notes, $built) {
+                if (Order::requested()->count() >= self::MAX_WAITING) {
+                    throw ValidationException::withMessages(['store' => 'Hay muchos pedidos esperando respuesta. Inténtalo de nuevo en unos minutos.']);
+                }
+
+                self::throttle($ip, $phone);
+
+                try {
+                    return self::create($token, $name, $phone, $service, $address, $references, $notes, $built);
+                } catch (UniqueConstraintViolationException) {
+                    // El mismo formulario llegó dos veces: gana el primero y el otro recibe ese mismo pedido.
+                    $existing = $token ? Order::where('operation_token', $token)->where('source', 'online')->first() : null;
+
+                    return $existing ?? self::create(null, $name, $phone, $service, $address, $references, $notes, $built);
+                }
+            });
+        } catch (LockTimeoutException) {
+            throw ValidationException::withMessages(['store' => 'Estamos recibiendo muchos pedidos. Inténtalo de nuevo en un momento.']);
+        }
+
+        self::broadcast(new OnlineOrderPlaced($order));
+
+        return $order;
+    }
+
+    /** @param  array<string, mixed>  $built */
+    protected static function create(?string $token, string $name, ?string $phone, string $service, string $address, string $references, string $notes, array $built): Order
+    {
+        return DB::transaction(function () use ($token, $name, $phone, $service, $address, $references, $notes, $built) {
             $delivery = $service === 'delivery';
             $order = Order::create([
                 'source' => 'online',
@@ -126,10 +187,6 @@ class OnlineOrder
 
             return $order->fresh(['items']);
         });
-
-        self::broadcast(new OnlineOrderPlaced($order));
-
-        return $order;
     }
 
     /** El taquero acepta: entra a Pedidos y Cocina como cualquier pedido por cobrar, con su número del día. */
@@ -139,6 +196,13 @@ class OnlineOrder
             $locked = Order::whereKey($order->id)->where('status', OrderStatus::Requested)->lockForUpdate()->first();
 
             if (! $locked) {
+                return null;
+            }
+
+            // Un pedido que ya venció no se acepta: el cliente ya lo ve como cancelado o lo verá en su próxima consulta.
+            if ($locked->created_at->lt(now()->subMinutes(self::EXPIRE_MINUTES))) {
+                $locked->cancel('Nadie respondió a tiempo');
+
                 return null;
             }
 
@@ -187,6 +251,22 @@ class OnlineOrder
         return (bool) $changed;
     }
 
+    /** Cancela los pedidos en línea que llevan demasiado esperando respuesta. Devuelve cuántos. */
+    public static function expireStale(): int
+    {
+        // Una vez al día se borran los datos de contacto de pedidos viejos: se conserva el nombre y lo vendido, no el teléfono ni la dirección.
+        if (Cache::add('online-orders:purged', true, now()->addDay())) {
+            Order::where('source', 'online')->whereNotNull('customer_phone')->where('created_at', '<', now()->subDays(self::KEEP_CONTACT_DAYS))
+                ->update(['customer_phone' => null, 'delivery_phone' => null, 'delivery_address' => null, 'delivery_notes' => null]);
+        }
+
+        $stale = Order::requested()->where('created_at', '<', now()->subMinutes(self::EXPIRE_MINUTES))->get();
+
+        $stale->each(fn (Order $order) => self::cancelRequested($order, 'Nadie respondió a tiempo'));
+
+        return $stale->count();
+    }
+
     /** Avisa a la página del cliente que su pedido cambió (para los cambios que se hacen con consultas directas). */
     public static function notifyCustomer(int $id): void
     {
@@ -206,6 +286,11 @@ class OnlineOrder
     /** Pasa de "(55) 1234 5678" o "+52 55 1234 5678" a los 10 dígitos; null si no se puede. */
     public static function normalizePhone(string $phone): ?string
     {
+        // Solo se aceptan los signos que se usan al escribir un teléfono; con letras u otros símbolos no se adivina.
+        if (! preg_match('/^[\d\s().+-]+$/', $phone)) {
+            return null;
+        }
+
         $digits = preg_replace('/\D+/', '', $phone) ?? '';
 
         if (strlen($digits) === 12 && str_starts_with($digits, '52')) {
@@ -257,11 +342,24 @@ class OnlineOrder
         }]);
     }
 
+    /** Cada llamada a place() cuenta, aunque falle: así no se puede gastar consultas de la base con pedidos inválidos. */
+    protected static function throttleAttempts(string $ip): void
+    {
+        $key = 'online-attempt-ip|'.$ip;
+
+        if (RateLimiter::tooManyAttempts($key, self::LIMIT_ATTEMPTS)) {
+            throw ValidationException::withMessages(['store' => 'Hiciste demasiados intentos. Espera unos minutos e inténtalo de nuevo.']);
+        }
+
+        RateLimiter::hit($key, 600);
+    }
+
     protected static function throttle(string $ip, ?string $phone): void
     {
         $limits = [
             'online-order-ip|'.$ip => [self::LIMIT_PER_IP, 600],
             'online-order-phone|'.$phone => [self::LIMIT_PER_PHONE, 3600],
+            'online-order-global' => [self::LIMIT_GLOBAL, 600],
         ];
 
         foreach ($limits as $key => [$attempts]) {

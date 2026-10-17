@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -16,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Guarda el hash de la contraseña en la sesión: al cambiarla se cierran los demás equipos.
         // Los proxies de confianza se configuran en AppServiceProvider (config/app.php).
         $middleware->authenticateSessions();
+        $middleware->append(SecurityHeaders::class);
 
         // Quien ya entró y abre el login va al sistema, no a la página de los clientes.
         $middleware->redirectUsersTo(fn () => route('vender'));
