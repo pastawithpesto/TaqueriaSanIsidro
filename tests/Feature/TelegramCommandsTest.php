@@ -108,8 +108,8 @@ class TelegramCommandsTest extends TestCase
             ['update_id' => 11, 'message' => ['text' => '/menu']],
         ];
         Http::fake([
-            Telegram::API.'/bot123:abc/deleteWebhook' => Http::response(['ok' => true, 'result' => true]),
-            Telegram::API.'/bot123:abc/getUpdates' => Http::response(['ok' => true, 'result' => $updates]),
+            Telegram::api().'/bot123:abc/deleteWebhook' => Http::response(['ok' => true, 'result' => true]),
+            Telegram::api().'/bot123:abc/getUpdates' => Http::response(['ok' => true, 'result' => $updates]),
         ]);
 
         $this->artisan('telegram:poll', ['--once' => true])
@@ -126,8 +126,8 @@ class TelegramCommandsTest extends TestCase
         $this->enableBot();
         Cache::forever('telegram:offset', 12);
         Http::fake([
-            Telegram::API.'/bot123:abc/deleteWebhook' => Http::response(['ok' => true, 'result' => true]),
-            Telegram::API.'/bot123:abc/getUpdates' => Http::response(['ok' => true, 'result' => [
+            Telegram::api().'/bot123:abc/deleteWebhook' => Http::response(['ok' => true, 'result' => true]),
+            Telegram::api().'/bot123:abc/getUpdates' => Http::response(['ok' => true, 'result' => [
                 ['update_id' => 11], ['update_id' => 12],
             ]]),
         ]);
@@ -152,8 +152,8 @@ class TelegramCommandsTest extends TestCase
         $this->enableBot();
         Cache::forever('telegram:offset', 42);
         Http::fake([
-            Telegram::API.'/bot123:abc/deleteWebhook' => Http::response(['ok' => true, 'result' => true]),
-            Telegram::API.'/bot123:abc/getUpdates' => Http::response([], 503),
+            Telegram::api().'/bot123:abc/deleteWebhook' => Http::response(['ok' => true, 'result' => true]),
+            Telegram::api().'/bot123:abc/getUpdates' => Http::response([], 503),
         ]);
 
         $this->artisan('telegram:poll', ['--once' => true])
