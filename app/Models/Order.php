@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Events\OnlineOrderUpdated;
+use App\Events\OrdersChanged;
 use App\Support\BusinessDay;
 use App\Support\OnlineOrder;
 use Carbon\CarbonInterface;
@@ -25,10 +26,20 @@ class Order extends Model
             $order->version = (int) $order->getOriginal('version') + 1;
         });
 
-        // Si cambia algo que el cliente ve en su página (aceptado, listo, en camino, entregado, cancelado), se le avisa.
+        // Pedidos, cocina y corte se enteran de cualquier cambio, sea cual sea el origen del pedido.
+        // Al cliente solo se le avisa de lo que ve en su página (aceptado, listo, en camino, entregado, cancelado).
         static::updated(function (Order $order) {
+            OnlineOrder::broadcast(new OrdersChanged($order));
+
             if ($order->source === 'online' && $order->public_token && $order->wasChanged(['status', 'accepted_at', 'ready_at', 'dispatched_at', 'delivered_at', 'cancelled_at'])) {
                 OnlineOrder::broadcast(new OnlineOrderUpdated($order));
+            }
+        });
+
+        // Un pedido de la caja aparece en la cocina de otra pantalla; los de en línea ya avisan al llegar (OnlineOrderPlaced).
+        static::created(function (Order $order) {
+            if ($order->source !== 'online') {
+                OnlineOrder::broadcast(new OrdersChanged($order));
             }
         });
     }

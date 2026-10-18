@@ -266,7 +266,7 @@ new #[Title('Corte de caja')] class extends Component
 };
 ?>
 
-<div wire:poll.60s.visible="refreshTotals" x-data="{
+<div wire:poll.60s.visible="refreshTotals" @orders-changed.window="$wire.refreshTotals()" x-data="{
         get expected() { return Math.round(((Number($wire.opening) || 0) + $wire.cashSales + $wire.movementsNet - $wire.cashExpenses) * 100) / 100 },
         moveOpen: false,
         moveError: '',

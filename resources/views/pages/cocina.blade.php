@@ -86,9 +86,11 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
     Un pedido nuevo suena y su tarjeta parpadea: en la plancha nadie mira la tablet todo el tiempo.
     El navegador solo deja sonar después de que alguien toca la pantalla (unlock).
 --}}
-<div wire:poll.10s
+<div @orders-changed.window="$wire.$refresh()"
      x-data="{
         now: Date.now(),
+        stopFallback: null,
+        destroy() { this.stopFallback?.() },
         lock: null,
         ready: false,
         audio: null,
@@ -121,6 +123,7 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
      }"
      x-init="
         setInterval(() => now = Date.now(), 15000);
+        stopFallback = window.realtimeFallback?.(() => $wire.$refresh(), 10);
         // Mantener la pantalla encendida mientras esta vista esté abierta.
         const keep = async () => { try { lock = await navigator.wakeLock?.request('screen') } catch (e) {} };
         keep(); document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && keep());

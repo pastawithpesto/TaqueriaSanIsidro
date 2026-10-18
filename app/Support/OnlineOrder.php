@@ -281,10 +281,13 @@ class OnlineOrder
         }
     }
 
-    /** Avisa a las pantallas abiertas. Si el servidor de tiempo real no responde, el pedido no se pierde. */
+    /**
+     * Avisa a las pantallas abiertas. Si el servidor de tiempo real no responde, el pedido no se pierde.
+     * Dentro de una transacción el aviso sale al confirmarla: ahí también debe quedar protegido.
+     */
     public static function broadcast(object $event): void
     {
-        rescue(fn () => event($event), report: true);
+        DB::afterCommit(fn () => rescue(fn () => event($event), report: true));
     }
 
     /** Pasa de "(55) 1234 5678" o "+52 55 1234 5678" a los 10 dígitos; null si no se puede. */

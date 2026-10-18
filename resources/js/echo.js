@@ -13,6 +13,31 @@ const setState = (connected) => {
 
 let adminChannel = null;
 let audio = null;
+let changedTimer = null;
+
+/*
+ * Respaldo del tiempo real para las pantallas que se vuelven a leer solas (Pedidos, cocina, seguimiento).
+ * Con el websocket caído consulta cada `seconds`; conectado, cada minuto por si se perdió un aviso.
+ * Al reconectar se lee de inmediato lo que cambió mientras tanto. Devuelve la función para detenerlo.
+ */
+window.realtimeFallback = (refresh, seconds) => {
+    let last = Date.now();
+    const run = () => { last = Date.now(); refresh(); };
+    const timer = setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        if (Date.now() - last >= (window.realtime.connected ? 60 : seconds) * 1000) run();
+    }, 5000);
+    const onState = (event) => event.detail === 'connected' && run();
+    const onChanged = () => { last = Date.now(); };
+    window.addEventListener('realtime:state', onState);
+    window.addEventListener('orders-changed', onChanged);
+
+    return () => {
+        clearInterval(timer);
+        window.removeEventListener('realtime:state', onState);
+        window.removeEventListener('orders-changed', onChanged);
+    };
+};
 
 // Igual que en cocina: el audio se habilita únicamente con un gesto real del usuario.
 const unlockAudio = (event) => {
@@ -83,6 +108,16 @@ const syncAdminChannel = () => {
             window.dispatchEvent(new CustomEvent('toast', {
                 detail: { message: `Pedido en línea nuevo de ${detail.name || 'Cliente'}`, type: 'success' },
             }));
+        })
+        // Un pedido cambió (Telegram, caja u otra pantalla): Pedidos y cocina se vuelven a leer y el contador se corrige.
+        // Guardar o cobrar un pedido manda varios avisos seguidos: se juntan en una sola lectura.
+        .listen('.changed', () => {
+            if (! isAdmin()) return;
+            clearTimeout(changedTimer);
+            changedTimer = setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('orders-changed'));
+                refreshAdminPending();
+            }, 300);
         });
 };
 

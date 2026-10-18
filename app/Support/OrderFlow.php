@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
+use App\Events\OrdersChanged;
 use App\Models\Order;
 use Illuminate\Support\Facades\DB;
 
@@ -98,6 +99,10 @@ class OrderFlow
         }
 
         $order = Order::with('items')->find($id);
+
+        if ($order) {
+            OnlineOrder::broadcast(new OrdersChanged($order));
+        }
 
         if ($order?->isOnline()) {
             OnlineOrder::notifyCustomer($id);

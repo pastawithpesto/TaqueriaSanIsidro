@@ -65,9 +65,9 @@ new #[Layout('layouts::public')] #[Title('Tu pedido')] class extends Component
     $paymentNote = $order->isDelivery() ? 'Pagas cuando te lo entregamos.' : 'Pagas cuando recoges tu pedido.';
 @endphp
 
-<div class="mx-auto min-h-dvh max-w-xl pb-10" wire:poll.10s
-     x-data="{ listen() { if (! window.Echo) return; window.Echo.channel('order.{{ $token }}').listen('.updated', () => $wire.$refresh()); } }"
-     x-init="listen()">
+<div class="mx-auto min-h-dvh max-w-xl pb-10"
+     x-data="{ stopFallback: null, destroy() { this.stopFallback?.() }, listen() { if (! window.Echo) return; window.Echo.channel('order.{{ $token }}').listen('.updated', () => $wire.$refresh()); } }"
+     x-init="listen(); stopFallback = window.realtimeFallback?.(() => $wire.$refresh(), 10)">
     <header class="bg-brand flex flex-col items-center rounded-b-3xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-5 text-center">
         <x-logo class="size-28 shadow-lg ring-4 ring-white/80" :res="512" />
         <p class="mt-3 font-display text-[1.75rem] leading-tight">{{ Branding::name() }}</p>

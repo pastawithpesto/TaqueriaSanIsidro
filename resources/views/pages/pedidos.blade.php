@@ -131,8 +131,9 @@ new #[Title('Pedidos')] class extends Component
 };
 ?>
 
-<div wire:poll.15s.visible x-data="{ now: Date.now(), rejecting: null, reason: '' }" x-init="setInterval(() => now = Date.now(), 30000)"
-     @online-order.window="$wire.$refresh()">
+<div x-data="{ now: Date.now(), rejecting: null, reason: '', stopFallback: null, destroy() { this.stopFallback?.() } }"
+     x-init="setInterval(() => now = Date.now(), 30000); stopFallback = window.realtimeFallback?.(() => $wire.$refresh(), 15)"
+     @online-order.window="$wire.$refresh()" @orders-changed.window="$wire.$refresh()">
     <x-page-header title="Pedidos" tour="pedidos">
         <x-slot:actions>
             {{-- En el celular solo el ícono: con el texto, el título se cortaba a "P...". --}}

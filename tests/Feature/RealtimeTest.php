@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Enums\OrderStatus;
 use App\Events\OnlineOrderPlaced;
 use App\Events\OnlineOrderUpdated;
+use App\Events\OrdersChanged;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Models\User;
 use App\Support\OnlineOrder;
+use App\Support\OrderFlow;
 use Illuminate\Broadcasting\Broadcasters\NullBroadcaster;
 use Illuminate\Broadcasting\BroadcastException;
 use Illuminate\Broadcasting\Channel;
@@ -171,6 +173,61 @@ class RealtimeTest extends TestCase
         $this->assertTrue($changed);
         Event::assertDispatched(OnlineOrderUpdated::class, fn ($event) => $event->order->is($order) && $event->order->status === $status);
         Event::assertDispatchedTimes(OnlineOrderUpdated::class, 1);
+    }
+
+    public function test_the_changed_event_has_a_private_channel_and_only_the_id(): void
+    {
+        $order = new Order(['customer_phone' => '8681234567', 'public_token' => 'secret-token']);
+        $order->id = 42;
+        $event = new OrdersChanged($order);
+
+        $this->assertInstanceOf(ShouldBroadcastNow::class, $event);
+        $this->assertSame('private-admin-orders', $event->broadcastOn()[0]->name);
+        $this->assertSame('changed', $event->broadcastAs());
+        $this->assertSame(['id' => 42], $event->broadcastWith());
+    }
+
+    #[DataProvider('orderTransitions')]
+    public function test_changing_an_online_order_also_tells_the_admin_screens(string $action, OrderStatus $status): void
+    {
+        $order = $this->placeOrder();
+        Event::fake([OnlineOrderPlaced::class, OnlineOrderUpdated::class, OrdersChanged::class]);
+
+        $action === 'reject' ? OnlineOrder::reject($order, 'Se acabó algún producto') : OnlineOrder::{$action}($order);
+
+        Event::assertDispatchedTimes(OrdersChanged::class, 1);
+    }
+
+    public function test_a_counter_order_tells_the_admin_screens_when_it_is_created_and_when_it_moves_on(): void
+    {
+        Event::fake([OrdersChanged::class]);
+
+        $order = Order::create(['source' => 'pos', 'status' => OrderStatus::Open, 'daily_number' => 1, 'label' => 'Mesa 4', 'total' => 40, 'sold_at' => now()]);
+        Event::assertDispatchedTimes(OrdersChanged::class, 1);
+
+        $this->assertTrue(OrderFlow::markReady($order->id));
+        $this->assertTrue(OrderFlow::deliver($order->id));
+        Event::assertDispatchedTimes(OrdersChanged::class, 3);
+
+        $this->assertFalse(OrderFlow::markReady($order->id));
+        Event::assertDispatchedTimes(OrdersChanged::class, 3);
+    }
+
+    public function test_accepting_an_order_works_when_the_broadcaster_throws(): void
+    {
+        $order = $this->placeOrder();
+        $broadcaster = new class extends NullBroadcaster
+        {
+            public function broadcast(array $channels, $event, array $payload = [])
+            {
+                throw new BroadcastException('Reverb no está disponible');
+            }
+        };
+        Broadcast::extend('failing', fn () => $broadcaster);
+        config(['broadcasting.default' => 'failing', 'broadcasting.connections.failing' => ['driver' => 'failing']]);
+
+        $this->assertTrue(OnlineOrder::accept($order));
+        $this->assertSame(OrderStatus::Open, $order->fresh()->status);
     }
 
     public function test_an_order_and_its_items_are_saved_when_the_broadcaster_throws(): void
