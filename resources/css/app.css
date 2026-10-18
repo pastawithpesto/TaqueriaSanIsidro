@@ -86,6 +86,8 @@
         text-size-adjust: 100%;
         /* Lilita One tiene un solo peso: que el navegador no invente negritas. */
         font-synthesis: none;
+        /* Tocar dos veces un botón (más tacos) no debe hacer zoom; el pellizco sigue disponible. */
+        touch-action: manipulation;
     }
 
     /* En la capa base para que utilidades como bg-brand (login) puedan cambiar el fondo. */
