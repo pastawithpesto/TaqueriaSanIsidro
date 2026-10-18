@@ -263,18 +263,27 @@ class Telegram
 
     public static function addStaff(int $chatId, string $name): void
     {
-        $chats = collect(self::staffChats())->reject(fn ($c) => (string) $c['id'] === (string) $chatId)
-            ->push(['id' => $chatId, 'name' => mb_substr(Names::clean($name), 0, 60) ?: 'Chat '.$chatId])->values()->all();
-
-        Setting::put('telegram_staff', json_encode($chats));
+        self::changeStaff(fn ($chats) => $chats->reject(fn ($c) => (string) $c['id'] === (string) $chatId)
+            ->push(['id' => $chatId, 'name' => mb_substr(Names::clean($name), 0, 60) ?: 'Chat '.$chatId]));
     }
 
     public static function removeStaff(int|string $chatId): void
     {
-        $chats = collect(self::staffChats())->reject(fn ($c) => (string) $c['id'] === (string) $chatId)->values()->all();
-
-        Setting::put('telegram_staff', $chats ? json_encode($chats) : null);
+        self::changeStaff(fn ($chats) => $chats->reject(fn ($c) => (string) $c['id'] === (string) $chatId));
         self::applyStaffUi((int) $chatId, false);
+    }
+
+    /**
+     * Cambia la lista de chats del taquero de uno en uno y sobre lo último guardado: dos cambios a la vez
+     * no deben perder uno (un chat desvinculado no puede volver a aparecer).
+     */
+    protected static function changeStaff(callable $change): void
+    {
+        Cache::lock('telegram:staff', 10)->block(5, function () use ($change) {
+            Setting::flush();
+            $chats = $change(collect(self::staffChats()))->values()->all();
+            Setting::put('telegram_staff', $chats ? json_encode($chats) : null);
+        });
     }
 
     /** ¿Este chat del taquero está viendo el bot como un cliente? Por defecto ve el panel de taquero. */
@@ -286,9 +295,7 @@ class Telegram
     /** Cambia lo que ve el chat del taquero: el panel de taquero o el bot como lo ve un cliente. */
     public static function setCustomerView(int $chatId, bool $customer): void
     {
-        $chats = collect(self::staffChats())->map(fn ($c) => (string) $c['id'] === (string) $chatId ? [...$c, 'customer_view' => $customer] : $c)->values()->all();
-
-        Setting::put('telegram_staff', json_encode($chats));
+        self::changeStaff(fn ($chats) => $chats->map(fn ($c) => (string) $c['id'] === (string) $chatId ? [...$c, 'customer_view' => $customer] : $c));
         self::applyStaffUi($chatId, ! $customer);
     }
 

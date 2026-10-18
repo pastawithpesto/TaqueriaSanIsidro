@@ -131,8 +131,8 @@ new #[Title('Pedidos')] class extends Component
 };
 ?>
 
-<div x-data="{ now: Date.now(), rejecting: null, reason: '', stopFallback: null, destroy() { this.stopFallback?.() } }"
-     x-init="setInterval(() => now = Date.now(), 30000); stopFallback = window.realtimeFallback?.(() => $wire.$refresh(), 15)"
+<div x-data="{ now: Date.now(), rejecting: null, reason: '', clock: null, stopFallback: null, destroy() { clearInterval(this.clock); this.stopFallback?.() } }"
+     x-init="clock = setInterval(() => now = Date.now(), 30000); stopFallback = window.realtimeFallback?.(() => $wire.$refresh(), 15)"
      @online-order.window="$wire.$refresh()" @orders-changed.window="$wire.$refresh()">
     <x-page-header title="Pedidos" tour="pedidos">
         <x-slot:actions>

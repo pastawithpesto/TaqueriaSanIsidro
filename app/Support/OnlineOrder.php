@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Pedidos que hacen los clientes desde la página pública. Todos llegan "Por aceptar":
@@ -281,13 +282,33 @@ class OnlineOrder
         }
     }
 
+    /** Segundos sin intentar avisar después de que el servidor de tiempo real falló. */
+    public const REALTIME_PAUSE = 30;
+
     /**
-     * Avisa a las pantallas abiertas. Si el servidor de tiempo real no responde, el pedido no se pierde.
-     * Dentro de una transacción el aviso sale al confirmarla: ahí también debe quedar protegido.
+     * Avisa a las pantallas abiertas y, por Telegram, al taquero y al cliente. Si algo falla, el pedido no se pierde.
+     * Dentro de una transacción los avisos salen al confirmarla: ahí también deben quedar protegidos.
+     *
+     * Telegram va aparte del websocket: si Reverb falla, Laravel no llega a los listeners del evento y los
+     * avisos se perderían. Tras una falla de Reverb se deja de intentar un rato, para que cada venta no espere
+     * a que venza la conexión; mientras tanto las pantallas se actualizan con su consulta de respaldo.
      */
     public static function broadcast(object $event): void
     {
-        DB::afterCommit(fn () => rescue(fn () => event($event), report: true));
+        DB::afterCommit(function () use ($event) {
+            if (! Cache::has('realtime:down')) {
+                rescue(fn () => event($event), function (Throwable $e) {
+                    Cache::put('realtime:down', true, self::REALTIME_PAUSE);
+                    report($e);
+                }, report: false);
+            }
+
+            rescue(fn () => match (true) {
+                $event instanceof OnlineOrderPlaced => TelegramNotifier::placed($event->order),
+                $event instanceof OnlineOrderUpdated => TelegramNotifier::updated($event->order),
+                default => null,
+            }, report: true);
+        });
     }
 
     /** Pasa de "(55) 1234 5678" o "+52 55 1234 5678" a los 10 dígitos; null si no se puede. */

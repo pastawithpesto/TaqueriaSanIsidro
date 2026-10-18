@@ -12,10 +12,13 @@ use App\Support\Store;
 use App\Support\Telegram;
 use App\Support\TelegramBot;
 use App\Support\TelegramNotifier;
+use Illuminate\Broadcasting\Broadcasters\NullBroadcaster;
+use Illuminate\Broadcasting\BroadcastException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -632,6 +635,49 @@ class TelegramBotTest extends TestCase
         $this->assertStringContainsString('2 ventas por $200', $texts);
         $this->assertStringContainsString('En línea: 1 por $130', $texts);
         $this->assertNotNull($paid);
+    }
+
+    public function test_telegram_notices_still_go_out_when_the_realtime_server_is_down(): void
+    {
+        $broadcaster = new class extends NullBroadcaster
+        {
+            public int $attempts = 0;
+
+            public function broadcast(array $channels, $event, array $payload = [])
+            {
+                $this->attempts++;
+
+                throw new BroadcastException('Reverb no está disponible');
+            }
+        };
+        Broadcast::extend('failing', fn () => $broadcaster);
+        config(['broadcasting.default' => 'failing', 'broadcasting.connections.failing' => ['driver' => 'failing']]);
+        $this->makeStaff();
+
+        $order = $this->placeOrder([], self::CLIENT);
+        $this->assertStringContainsString('Pedido en línea de Juan', $this->texts());
+        $this->assertStringContainsString('Recibimos tu pedido', $this->texts());
+
+        $this->assertTrue(OnlineOrder::accept($order));
+        $this->assertStringContainsString('Tu pedido fue aceptado', $this->texts());
+
+        // Tras la primera falla ya no se intenta en cada aviso: la venta no espera a que venza la conexión.
+        $this->assertSame(1, $broadcaster->attempts);
+    }
+
+    public function test_a_chat_unlinked_elsewhere_does_not_come_back_when_another_chat_changes(): void
+    {
+        $this->makeStaff(self::STAFF);
+        $this->makeStaff(8881);
+        $this->assertTrue(Telegram::isStaff(8881));
+
+        // Otro proceso desvinculó 8881; este todavía tiene la lista vieja en memoria.
+        Setting::where('key', 'telegram_staff')->update(['value' => json_encode([['id' => self::STAFF, 'name' => 'Taquero']])]);
+
+        Telegram::setCustomerView(self::STAFF, true);
+
+        $this->assertFalse(Telegram::isStaff(8881));
+        $this->assertTrue(Telegram::usesCustomerView(self::STAFF));
     }
 
     public function test_telegram_being_down_never_breaks_a_customer_order(): void

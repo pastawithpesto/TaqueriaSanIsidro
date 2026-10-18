@@ -97,7 +97,7 @@ class TelegramAdmin
             match ($mode) {
                 'open' => 'Quedó abierta sin importar el horario.',
                 'closed' => 'Quedó cerrada sin importar el horario.',
-                default => 'Sigue el horario: '.Store::summary().'.',
+                default => 'Sigue el horario: '.Telegram::esc(Store::summary()).'.',
             },
             'Pedidos en línea: '.(Store::onlineEnabled() ? 'activados' : 'apagados').'.',
             'Domicilio: '.(Store::deliveryEnabled() ? 'disponible' : 'no disponible').'.',

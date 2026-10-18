@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Setting;
 use App\Support\Telegram;
 use App\Support\TelegramBot;
 use Illuminate\Console\Attributes\Description;
@@ -47,6 +48,9 @@ class TelegramPoll extends Command
             ], timeout: 35);
 
             if (is_array($updates)) {
+                // Proceso largo: los ajustes (chats del taquero, tienda) pudieron cambiar desde la web.
+                Setting::flush();
+
                 foreach ($updates as $update) {
                     if (! $running) {
                         break;

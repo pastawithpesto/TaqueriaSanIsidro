@@ -27,7 +27,13 @@ window.realtimeFallback = (refresh, seconds) => {
         if (document.visibilityState !== 'visible') return;
         if (Date.now() - last >= (window.realtime.connected ? 60 : seconds) * 1000) run();
     }, 5000);
-    const onState = (event) => event.detail === 'connected' && run();
+    // La primera conexión no trae nada nuevo; al reconectar sí puede haber cambios que no llegaron.
+    let wasConnected = window.realtime.connected;
+    const onState = (event) => {
+        if (event.detail !== 'connected') return;
+        if (wasConnected) run();
+        wasConnected = true;
+    };
     const onChanged = () => { last = Date.now(); };
     window.addEventListener('realtime:state', onState);
     window.addEventListener('orders-changed', onChanged);

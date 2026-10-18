@@ -141,7 +141,7 @@ class TelegramBot
             $lines[] = Telegram::esc($status['message']);
         }
 
-        $lines[] = 'Horario: '.Store::summary().'.';
+        $lines[] = 'Horario: '.Telegram::esc(Store::summary()).'.';
         $lines[] = Store::onlineEnabled() ? 'Pedidos en línea: activados.' : 'Pedidos en línea: apagados por ahora.';
         $lines[] = Store::deliveryEnabled() ? 'A domicilio: disponible.' : Telegram::esc(Store::deliveryOffMessage());
 
