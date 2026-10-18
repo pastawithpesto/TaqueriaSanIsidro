@@ -62,7 +62,12 @@ class TelegramBot
             'ayuda', 'help' => self::help($chatId),
             'vincular' => self::link($chatId, $name, $arguments),
             'desvincular' => self::unlink($chatId),
-            'pendientes' => self::pending($chatId, $private),
+            'pendientes' => self::staffOnly($chatId, $private, fn () => TelegramAdmin::requested($chatId)),
+            'activos' => self::staffOnly($chatId, $private, fn () => TelegramAdmin::active($chatId)),
+            'hoy' => self::staffOnly($chatId, $private, fn () => TelegramAdmin::today($chatId)),
+            'tienda' => self::staffOnly($chatId, $private, fn () => TelegramAdmin::store($chatId)),
+            'panel' => self::staffOnly($chatId, $private, fn () => self::showPanel($chatId)),
+            'cliente' => self::staffOnly($chatId, $private, fn () => self::showCustomerView($chatId, $private, $name)),
             default => $private ? self::help($chatId) : null,
         };
     }
@@ -76,18 +81,24 @@ class TelegramBot
             return;
         }
 
+        if (self::adminView($chatId)) {
+            TelegramAdmin::panel($chatId);
+
+            return;
+        }
+
         $first = Telegram::esc(Str::before($name, ' '));
         $store = Store::status();
         $line = $store['open'] ? 'Estamos abiertos' : 'Por ahora estamos cerrados';
 
-        Telegram::send($chatId, 'Hola'.($first !== '' ? ', '.$first : '').'. Bienvenido a '.Telegram::esc(Branding::name()).".\n".$line.'. '.($store['message'] ? Telegram::esc($store['message']).' ' : '')."\nToca Hacer pedido para ver el menú, personalizar tus tacos y pedir.", self::mainKeyboard($private));
+        Telegram::send($chatId, 'Hola'.($first !== '' ? ', '.$first : '').'. Bienvenido a '.Telegram::esc(Branding::name()).".\n".$line.'. '.($store['message'] ? Telegram::esc($store['message']).' ' : '')."\nToca Hacer pedido para ver el menú, personalizar tus tacos y pedir.", self::mainKeyboard($private, $chatId));
     }
 
     protected static function order(int $chatId, bool $private): void
     {
         $store = self::availability();
 
-        Telegram::send($chatId, ($store ? $store."\n" : '').'Abre el menú para armar tu pedido.', self::mainKeyboard($private));
+        Telegram::send($chatId, ($store ? $store."\n" : '').'Abre el menú para armar tu pedido.', self::mainKeyboard($private, $chatId));
     }
 
     protected static function menu(int $chatId): void
@@ -117,7 +128,7 @@ class TelegramBot
         $chunks[] = $current;
 
         foreach ($chunks as $i => $chunk) {
-            Telegram::send($chatId, rtrim($chunk), $i === array_key_last($chunks) ? self::mainKeyboard(true) : null);
+            Telegram::send($chatId, rtrim($chunk), $i === array_key_last($chunks) ? self::mainKeyboard(true, $chatId) : null);
         }
     }
 
@@ -142,7 +153,7 @@ class TelegramBot
         $order = Order::where('telegram_chat_id', $chatId)->where('source', 'online')->latest('id')->first();
 
         if (! $order || $order->isTrackingExpired()) {
-            Telegram::send($chatId, 'No encuentro un pedido reciente tuyo. Toca Hacer pedido para empezar.', self::mainKeyboard(true));
+            Telegram::send($chatId, 'No encuentro un pedido reciente tuyo. Toca Hacer pedido para empezar.', self::mainKeyboard(true, $chatId));
 
             return;
         }
@@ -154,9 +165,16 @@ class TelegramBot
 
     protected static function help(int $chatId): void
     {
-        $staff = Telegram::isStaff($chatId) ? "\n\nComo taquero, aquí te llegan los pedidos nuevos con botones para aceptarlos o rechazarlos. /pendientes los vuelve a mostrar y /desvincular deja de enviarlos a este chat." : '';
+        if (self::adminView($chatId)) {
+            TelegramAdmin::help($chatId);
+            TelegramAdmin::panel($chatId);
 
-        Telegram::send($chatId, "Esto puedo hacer:\n/pedido para hacer un pedido\n/menu para ver el menú y los precios\n/horario para saber si estamos abiertos\n/estado para ver cómo va tu pedido".$staff, self::mainKeyboard(true));
+            return;
+        }
+
+        $staff = Telegram::isStaff($chatId) ? "\n\nComo taquero, /panel te regresa al panel y /desvincular deja de enviar los pedidos a este chat." : '';
+
+        Telegram::send($chatId, "Esto puedo hacer:\n/pedido para hacer un pedido\n/menu para ver el menú y los precios\n/horario para saber si estamos abiertos\n/estado para ver cómo va tu pedido".$staff, self::mainKeyboard(true, $chatId));
     }
 
     protected static function link(int $chatId, string $name, string $code): void
@@ -174,6 +192,8 @@ class TelegramBot
         }
 
         Telegram::send($chatId, 'Listo: este chat recibirá los pedidos en línea con botones para aceptarlos o rechazarlos.');
+        Telegram::applyStaffUi($chatId, true);
+        TelegramAdmin::panel($chatId);
 
         foreach (Order::requested()->with('items')->orderBy('created_at')->limit(10)->get() as $order) {
             TelegramNotifier::sendStaffNotice($order, $chatId);
@@ -190,7 +210,8 @@ class TelegramBot
         Telegram::send($chatId, 'Listo: este chat ya no recibe los pedidos.');
     }
 
-    protected static function pending(int $chatId, bool $private): void
+    /** Corre un comando del taquero; a cualquier otro chat le dice que no es suyo (solo en privado). */
+    protected static function staffOnly(int $chatId, bool $private, callable $run): void
     {
         if (! Telegram::isStaff($chatId)) {
             if ($private) {
@@ -200,15 +221,32 @@ class TelegramBot
             return;
         }
 
-        $orders = Order::requested()->with('items')->orderBy('created_at')->limit(10)->get();
+        $run();
+    }
 
-        if ($orders->isEmpty()) {
-            Telegram::send($chatId, 'No hay pedidos esperando respuesta.');
+    /** ¿Este chat es del taquero y está viendo el panel (no el bot como cliente)? */
+    protected static function adminView(int $chatId): bool
+    {
+        return Telegram::isStaff($chatId) && ! Telegram::usesCustomerView($chatId);
+    }
 
-            return;
+    protected static function showPanel(int $chatId): void
+    {
+        if (Telegram::usesCustomerView($chatId)) {
+            Telegram::setCustomerView($chatId, false);
         }
 
-        $orders->each(fn (Order $order) => TelegramNotifier::sendStaffNotice($order, $chatId));
+        TelegramAdmin::panel($chatId);
+    }
+
+    /** El taquero ve el bot tal como lo ve un cliente, con un botón para volver al panel. */
+    protected static function showCustomerView(int $chatId, bool $private, string $name = ''): void
+    {
+        if (! Telegram::usesCustomerView($chatId)) {
+            Telegram::setCustomerView($chatId, true);
+        }
+
+        self::start($chatId, $private, $name, '');
     }
 
     protected static function linkOrder(int $chatId, string $token): void
@@ -263,7 +301,20 @@ class TelegramBot
             return;
         }
 
-        $order = $orderId ? Order::where('source', 'online')->find($orderId) : null;
+        // Del panel del taquero: cambiar de vista, la tienda y las listas.
+        if (in_array($action, ['cv', 'adm'], true)) {
+            self::switchView($id, $chatId, $messageId, $action === 'cv', (string) ($query['from']['first_name'] ?? ''));
+
+            return;
+        }
+
+        if (in_array($action, TelegramAdmin::PANEL_ACTIONS, true)) {
+            TelegramAdmin::panelAction($id, $chatId, $messageId, $action);
+
+            return;
+        }
+
+        $order = $orderId ? Order::find($orderId) : null;
 
         if (! $order) {
             Telegram::answerCallback($id, 'Ese pedido ya no existe.');
@@ -271,11 +322,30 @@ class TelegramBot
             return;
         }
 
-        match ($action) {
-            'acc', 'rej', 'rjr', 'bk' => self::staffAction($id, $chatId, $messageId, $action, $order, isset($match[3]) ? (int) $match[3] : null),
-            'can' => self::customerCancel($id, $chatId, $order),
+        match (true) {
+            in_array($action, ['acc', 'rej', 'rjr', 'bk'], true) => self::staffAction($id, $chatId, $messageId, $action, $order, isset($match[3]) ? (int) $match[3] : null),
+            in_array($action, TelegramAdmin::ORDER_ACTIONS, true) => TelegramAdmin::orderAction($id, $chatId, $messageId, $action, $order, isset($match[3]) ? (int) $match[3] : null),
+            $action === 'can' => self::customerCancel($id, $chatId, $order),
             default => Telegram::answerCallback($id),
         };
+    }
+
+    /** "Ver como cliente" y "Volver al panel": cambian lo que ve el chat del taquero. */
+    protected static function switchView(string $id, int $chatId, ?int $messageId, bool $customer, string $name): void
+    {
+        if (! Telegram::isStaff($chatId)) {
+            Telegram::answerCallback($id, 'Este chat no es del taquero.', true);
+
+            return;
+        }
+
+        Telegram::answerCallback($id);
+
+        if ($customer) {
+            self::showCustomerView($chatId, true, $name);
+        } else {
+            self::showPanel($chatId);
+        }
     }
 
     protected static function staffAction(string $id, int $chatId, ?int $messageId, string $action, Order $order, ?int $reason): void
@@ -283,6 +353,13 @@ class TelegramBot
         // Solo los chats que el taquero vinculó pueden decidir; el botón de otro chat no sirve aunque conozca el número.
         if (! Telegram::isStaff($chatId)) {
             Telegram::answerCallback($id, 'Este chat no puede responder pedidos.', true);
+
+            return;
+        }
+
+        if ($action === 'bk') {
+            Telegram::answerCallback($id);
+            TelegramAdmin::refresh($chatId, $messageId, $order->loadMissing('items'));
 
             return;
         }
@@ -321,12 +398,6 @@ class TelegramBot
                 }
                 break;
 
-            case 'bk':
-                Telegram::answerCallback($id);
-                if ($messageId) {
-                    Telegram::edit($chatId, $messageId, TelegramNotifier::staffText($order), TelegramNotifier::staffKeyboard($order));
-                }
-                break;
         }
     }
 
@@ -349,16 +420,23 @@ class TelegramBot
     // ---- Ayudas ----
 
     /** @return array<string, mixed> */
-    protected static function mainKeyboard(bool $private): array
+    protected static function mainKeyboard(bool $private, ?int $chatId = null): array
     {
         $order = $private
             ? ['text' => 'Hacer pedido', 'web_app' => ['url' => Telegram::miniAppUrl()]]
             : ['text' => 'Hacer pedido', 'url' => url('/')];
 
-        return ['inline_keyboard' => [
+        $rows = [
             [$order],
             [['text' => 'Menú', 'callback_data' => 'menu'], ['text' => 'Horario', 'callback_data' => 'horario'], ['text' => 'Mi pedido', 'callback_data' => 'estado']],
-        ]];
+        ];
+
+        // El taquero que mira el bot como cliente siempre tiene a la mano cómo volver.
+        if ($chatId !== null && Telegram::isStaff($chatId)) {
+            $rows[] = [['text' => 'Volver al panel del taquero', 'callback_data' => 'adm']];
+        }
+
+        return ['inline_keyboard' => $rows];
     }
 
     /** Aviso corto si hoy no se puede pedir: cerrado, pedidos apagados o mensaje especial. */

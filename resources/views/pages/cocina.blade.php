@@ -3,8 +3,7 @@
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
-use App\Support\OnlineOrder;
-use Illuminate\Support\Facades\DB;
+use App\Support\OrderFlow;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -65,26 +64,20 @@ new #[Layout('layouts::kitchen')] #[Title('Cocina')] class extends Component
     public function markReady(int $id): void
     {
         $order = Order::find($id);
-        $changed = Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
-            ->whereNull('ready_at')->whereNull('dispatched_at')->whereNull('delivered_at')
-            ->update(['ready_at' => now(), 'version' => DB::raw('version + 1')]);
-        if (! $changed) {
+
+        if (! OrderFlow::markReady($id)) {
             $this->dispatch('toast', message: 'El pedido cambió y ya no se puede marcar listo. Recarga la lista.', type: 'error');
 
             return;
         }
         unset($this->queue, $this->ready);
-        OnlineOrder::notifyCustomer($id);
         $this->dispatch('toast', message: '#'.$order->daily_number.' listo');
     }
 
     public function unready(int $id): void
     {
-        Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
-            ->whereNotNull('ready_at')->whereNull('dispatched_at')->whereNull('delivered_at')
-            ->update(['ready_at' => null, 'version' => DB::raw('version + 1')]);
+        OrderFlow::unready($id);
         unset($this->queue, $this->ready);
-        OnlineOrder::notifyCustomer($id);
     }
 };
 ?>

@@ -350,7 +350,8 @@ class TelegramBotTest extends TestCase
         $edits = $this->sent('editMessageText');
         $this->assertNotEmpty($edits);
         $this->assertStringContainsString('Aceptado: es el #'.$order->daily_number, end($edits)['text']);
-        $this->assertSame([], end($edits)['reply_markup']['inline_keyboard']);
+        $buttons = collect(end($edits)['reply_markup']['inline_keyboard'])->flatten(1)->pluck('callback_data')->all();
+        $this->assertSame(['rdy:'.$order->id, 'dlv:'.$order->id, 'pay:'.$order->id, 'cnc:'.$order->id], $buttons);
     }
 
     public function test_a_chat_that_is_not_staff_cannot_accept_or_reject(): void

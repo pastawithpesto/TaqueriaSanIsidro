@@ -100,6 +100,8 @@ Contra pedidos falsos: nombre y teléfono obligatorios, límite de pedidos por e
 
 Crea un bot con `/newbot` en **@BotFather** y pega su token en **Tienda en línea** del sistema. Para vincular el Telegram del taquero, genera ahí un código y envía `/vincular CODIGO` al bot.
 
+El chat vinculado entra en modo taquero: `/panel` muestra los pedidos por aceptar y activos (listo, en camino, entregado, cobrar y cancelar con botones), el resumen de hoy y la tienda (abrir, cerrar, pedidos en línea y domicilio). **Ver como cliente** (o `/cliente`) muestra el bot como lo ve un cliente, con un botón para volver. Esos pasos de pedido viven en `App\Support\OrderFlow`, los mismos que usan Pedidos y la cocina.
+
 En producción se requiere una URL pública con **HTTPS**: el webhook usa una clave secreta y se registra con el botón del sistema o con `php artisan telegram:webhook`. Para quitarlo sin perder mensajes pendientes: `php artisan telegram:webhook --delete`.
 
 En desarrollo, conecta primero el bot y ejecuta `docker compose --profile telegram up -d` para levantar la consulta de mensajes y el programador. También puedes ejecutar `php artisan telegram:poll` directamente, junto con `php artisan schedule:work`. La consulta quita el webhook mientras está en uso; al volver a producción, regístralo otra vez. Usa un bot distinto para desarrollo si producción sigue activa.

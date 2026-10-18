@@ -30,6 +30,17 @@ class Telegram
     /** Intentos de vincular un chat del taquero con un código, por chat y en total. */
     public const LINK_ATTEMPTS = 5;
 
+    /** Comandos del chat del taquero, en el orden que salen en el menú. */
+    public const STAFF_COMMANDS = [
+        ['command' => 'panel', 'description' => 'Panel del taquero'],
+        ['command' => 'pendientes', 'description' => 'Pedidos por aceptar'],
+        ['command' => 'activos', 'description' => 'Pedidos por preparar, cobrar o entregar'],
+        ['command' => 'hoy', 'description' => 'Resumen de ventas de hoy'],
+        ['command' => 'tienda', 'description' => 'Abrir, cerrar y pedidos en línea'],
+        ['command' => 'cliente', 'description' => 'Ver el bot como lo ve un cliente'],
+        ['command' => 'ayuda', 'description' => 'Qué puedo hacer aquí'],
+    ];
+
     public static function token(): ?string
     {
         return Store::secret('telegram_token');
@@ -222,6 +233,10 @@ class Telegram
     /** Apaga el bot: quita el webhook y olvida las credenciales y los chats del taquero. */
     public static function disconnect(): void
     {
+        foreach (self::staffChats() as $chat) {
+            self::applyStaffUi((int) $chat['id'], false);
+        }
+
         self::call('deleteWebhook', ['drop_pending_updates' => true]);
 
         foreach (['telegram_token', 'telegram_secret', 'telegram_username', 'telegram_enabled', 'telegram_staff'] as $key) {
@@ -259,6 +274,41 @@ class Telegram
         $chats = collect(self::staffChats())->reject(fn ($c) => (string) $c['id'] === (string) $chatId)->values()->all();
 
         Setting::put('telegram_staff', $chats ? json_encode($chats) : null);
+        self::applyStaffUi((int) $chatId, false);
+    }
+
+    /** ¿Este chat del taquero está viendo el bot como un cliente? Por defecto ve el panel de taquero. */
+    public static function usesCustomerView(int|string $chatId): bool
+    {
+        return (bool) (collect(self::staffChats())->first(fn ($c) => (string) $c['id'] === (string) $chatId)['customer_view'] ?? false);
+    }
+
+    /** Cambia lo que ve el chat del taquero: el panel de taquero o el bot como lo ve un cliente. */
+    public static function setCustomerView(int $chatId, bool $customer): void
+    {
+        $chats = collect(self::staffChats())->map(fn ($c) => (string) $c['id'] === (string) $chatId ? [...$c, 'customer_view' => $customer] : $c)->values()->all();
+
+        Setting::put('telegram_staff', json_encode($chats));
+        self::applyStaffUi($chatId, ! $customer);
+    }
+
+    /**
+     * Comandos y botón de menú de un chat: los del taquero en el panel, y los de siempre (con el botón Pedir)
+     * como cliente o al desvincular.
+     */
+    public static function applyStaffUi(int $chatId, bool $admin): void
+    {
+        $scope = ['type' => 'chat', 'chat_id' => $chatId];
+
+        if ($admin) {
+            self::call('setMyCommands', ['commands' => self::STAFF_COMMANDS, 'scope' => $scope]);
+            self::call('setChatMenuButton', ['chat_id' => $chatId, 'menu_button' => ['type' => 'commands']]);
+
+            return;
+        }
+
+        self::call('deleteMyCommands', ['scope' => $scope]);
+        self::call('setChatMenuButton', ['chat_id' => $chatId, 'menu_button' => ['type' => 'web_app', 'text' => 'Pedir', 'web_app' => ['url' => self::miniAppUrl()]]]);
     }
 
     /** Código de 6 dígitos para vincular el Telegram del taquero; vale 10 minutos y una sola vez. */

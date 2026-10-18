@@ -4,8 +4,8 @@ use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Support\BusinessDay;
 use App\Support\OnlineOrder;
+use App\Support\OrderFlow;
 use App\Support\Store;
-use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -84,17 +84,13 @@ new #[Title('Pedidos')] class extends Component
     public function deliver(int $id): void
     {
         $order = Order::find($id);
-        $changed = Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
-            ->whereNull('delivered_at')
-            ->where(fn ($q) => $q->whereNull('service')->orWhere('service', '!=', 'delivery')->orWhereNotNull('dispatched_at'))
-            ->update(['delivered_at' => now(), 'version' => DB::raw('version + 1')]);
-        if (! $changed) {
+
+        if (! OrderFlow::deliver($id)) {
             $this->dispatch('toast', message: 'No se pudo marcar como entregado. Recarga la lista.', type: 'error');
 
             return;
         }
         unset($this->pending, $this->delivered);
-        OnlineOrder::notifyCustomer($id);
         $this->dispatch('pending-count', count: Order::pendingCount());
 
         $this->dispatch('toast', message: 'Entregado #'.$order->daily_number.($order->label ? ' '.$order->label : ''));
@@ -104,39 +100,31 @@ new #[Title('Pedidos')] class extends Component
     public function dispatchOrder(int $id): void
     {
         $order = Order::find($id);
-        $changed = Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])
-            ->where('service', 'delivery')->whereNull('dispatched_at')->whereNull('delivered_at')->where('version', $order?->version)
-            ->update(['dispatched_at' => now(), 'ready_at' => $order?->ready_at ?? now(), 'version' => DB::raw('version + 1')]);
-        if (! $changed) {
+
+        if (! OrderFlow::dispatch($id)) {
             $this->dispatch('toast', message: 'Este pedido no se puede enviar: ya salió, se canceló o no es a domicilio.', type: 'error');
 
             return;
         }
         unset($this->pending);
-        OnlineOrder::notifyCustomer($id);
         $this->dispatch('toast', message: '#'.$order->daily_number.' en camino');
     }
 
     public function undeliver(int $id): void
     {
-        Order::whereKey($id)->whereIn('status', [OrderStatus::Open, OrderStatus::Paid])->whereNotNull('delivered_at')
-            ->update(['delivered_at' => null, 'version' => DB::raw('version + 1')]);
+        OrderFlow::undeliver($id);
         unset($this->pending, $this->delivered);
-        OnlineOrder::notifyCustomer($id);
         $this->dispatch('pending-count', count: Order::pendingCount());
     }
 
     public function cancel(int $id): void
     {
-        $changed = Order::whereKey($id)->where('status', OrderStatus::Open)
-            ->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => now(), 'cancel_reason' => null, 'version' => DB::raw('version + 1')]);
-        if (! $changed) {
+        if (! OrderFlow::cancel($id)) {
             $this->dispatch('toast', message: 'El pedido ya se cobró o se canceló. Recarga la lista.', type: 'error');
 
             return;
         }
         unset($this->pending, $this->stale);
-        OnlineOrder::notifyCustomer($id);
         $this->dispatch('toast', message: 'Pedido cancelado');
         $this->dispatch('pending-count', count: Order::pendingCount());
     }

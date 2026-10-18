@@ -98,27 +98,46 @@ class TelegramNotifier
             return;
         }
 
-        $day = BusinessDay::of(now());
-        $paid = Order::paidBetween(BusinessDay::start($day), BusinessDay::end($day))->get();
-        $online = $paid->where('source', 'online');
-        $unpaid = Order::where('status', OrderStatus::Open)->count();
-
-        $text = '<b>Resumen del día</b>'."\n"
-            .$paid->count().' ventas por '.money($paid->sum('total'))."\n"
-            .'En línea: '.$online->count().' por '.money($online->sum('total'))
-            .($unpaid ? "\n".$unpaid.' pedidos todavía sin cobrar.' : '')
-            ."\nEl detalle y el corte de caja están en el sistema.";
+        $text = self::summaryText();
 
         foreach (Telegram::staffChats() as $chat) {
             Telegram::send((int) $chat['id'], $text);
         }
     }
 
+    /** Ventas del día de trabajo en curso: lo que se manda al cerrar y lo que el taquero pide con /hoy. */
+    public static function summaryText(): string
+    {
+        $day = BusinessDay::of(now());
+        $paid = Order::paidBetween(BusinessDay::start($day), BusinessDay::end($day))->get();
+        $online = $paid->where('source', 'online');
+        $unpaid = Order::where('status', OrderStatus::Open)->count();
+
+        return '<b>Resumen del día</b>'."\n"
+            .$paid->count().' ventas por '.money($paid->sum('total'))."\n"
+            .'En línea: '.$online->count().' por '.money($online->sum('total'))
+            .($unpaid ? "\n".$unpaid.' pedidos todavía sin cobrar.' : '')
+            ."\nEl detalle y el corte de caja están en el sistema.";
+    }
+
     public static function staffText(Order $order): string
     {
-        $lines = ['<b>Pedido en línea de '.Telegram::esc($order->label).'</b>'];
-        $lines[] = $order->isDelivery() ? 'A domicilio: '.Telegram::esc($order->delivery_address).($order->delivery_notes ? ' ('.Telegram::esc($order->delivery_notes).')' : '') : 'Pasa a recoger';
-        $lines[] = 'Teléfono: '.Telegram::esc($order->customer_phone);
+        $lines = [$order->isOnline()
+            ? '<b>Pedido en línea de '.Telegram::esc($order->label).'</b>'
+            : '<b>Pedido'.($order->daily_number ? ' #'.$order->daily_number : '').($order->label ? ' de '.Telegram::esc($order->label) : '').'</b>'];
+
+        if ($order->isDelivery()) {
+            $lines[] = 'A domicilio: '.Telegram::esc($order->delivery_address).($order->delivery_notes ? ' ('.Telegram::esc($order->delivery_notes).')' : '');
+        } elseif ($order->isOnline()) {
+            $lines[] = 'Pasa a recoger';
+        } elseif ($service = $order->serviceLabel()) {
+            $lines[] = $service;
+        }
+
+        if ($phone = $order->customer_phone ?: $order->delivery_phone) {
+            $lines[] = 'Teléfono: '.Telegram::esc($phone);
+        }
+
         $lines[] = '';
 
         foreach ($order->items as $item) {
@@ -137,7 +156,7 @@ class TelegramNotifier
         }
 
         $lines[] = '';
-        $lines[] = 'Total: '.money($order->total);
+        $lines[] = 'Total: '.money($order->total).self::payment($order);
 
         if ($footer = self::footer($order)) {
             $lines[] = '';
@@ -153,19 +172,59 @@ class TelegramNotifier
         return match (true) {
             $order->status === OrderStatus::Requested => null,
             $order->status === OrderStatus::Cancelled && $order->cancel_reason === Order::CUSTOMER_CANCELLED => 'Cancelado por el cliente',
-            $order->status === OrderStatus::Cancelled && ! $order->accepted_at && $order->cancel_reason === 'Nadie respondió a tiempo' => 'Caducó sin respuesta',
-            $order->status === OrderStatus::Cancelled && ! $order->accepted_at => 'Rechazado: '.($order->cancel_reason ?: 'sin motivo'),
+            $order->status === OrderStatus::Cancelled && $order->isOnline() && ! $order->accepted_at && $order->cancel_reason === 'Nadie respondió a tiempo' => 'Caducó sin respuesta',
+            $order->status === OrderStatus::Cancelled && $order->isOnline() && ! $order->accepted_at => 'Rechazado: '.($order->cancel_reason ?: 'sin motivo'),
             $order->status === OrderStatus::Cancelled => 'Cancelado',
             $order->delivered_at !== null => 'Entregado (#'.$order->daily_number.')',
+            $order->dispatched_at !== null => 'En camino (#'.$order->daily_number.')',
+            $order->ready_at !== null => 'Listo (#'.$order->daily_number.')',
             default => 'Aceptado: es el #'.$order->daily_number,
         };
     }
 
-    /** @return array{inline_keyboard: array<int, array<int, array<string, string>>>}|null */
+    /** Cómo se pagó o si falta cobrar; vacío mientras el pedido no se acepta o si se canceló. */
+    protected static function payment(Order $order): string
+    {
+        return match ($order->status) {
+            OrderStatus::Open => ' (por cobrar)',
+            OrderStatus::Paid => ' ('.($order->payment_method?->label() ?? 'pagado').')',
+            default => '',
+        };
+    }
+
+    /**
+     * Botones del mensaje del taquero según en qué va el pedido: aceptar o rechazar, y ya aceptado,
+     * preparar, entregar, cobrar o cancelar.
+     *
+     * @return array{inline_keyboard: array<int, array<int, array<string, string>>>}|null
+     */
     public static function staffKeyboard(Order $order): ?array
     {
-        return $order->status === OrderStatus::Requested
-            ? ['inline_keyboard' => [[['text' => 'Aceptar', 'callback_data' => 'acc:'.$order->id], ['text' => 'Rechazar', 'callback_data' => 'rej:'.$order->id]]]]
-            : null;
+        $id = $order->id;
+        $button = fn (string $text, string $action) => ['text' => $text, 'callback_data' => $action.':'.$id];
+
+        if ($order->status === OrderStatus::Requested) {
+            return ['inline_keyboard' => [[$button('Aceptar', 'acc'), $button('Rechazar', 'rej')]]];
+        }
+
+        if (! in_array($order->status, [OrderStatus::Open, OrderStatus::Paid], true)) {
+            return null;
+        }
+
+        $rows = [];
+
+        if ($order->delivered_at !== null) {
+            $rows[] = [$button('Deshacer entrega', 'und')];
+        } elseif ($order->isDelivery()) {
+            $rows[] = $order->dispatched_at !== null ? [$button('Entregado', 'dlv')] : array_filter([$order->ready_at === null ? $button('Listo', 'rdy') : null, $button('En camino', 'dsp')]);
+        } else {
+            $rows[] = array_filter([$order->ready_at === null ? $button('Listo', 'rdy') : null, $button('Entregado', 'dlv')]);
+        }
+
+        if ($order->status === OrderStatus::Open) {
+            $rows[] = [$button('Cobrar', 'pay'), $button('Cancelar', 'cnc')];
+        }
+
+        return ['inline_keyboard' => array_map('array_values', $rows)];
     }
 }
