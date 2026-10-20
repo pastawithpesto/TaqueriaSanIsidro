@@ -9,8 +9,8 @@ Laravel 13, Livewire 4, Tailwind 4, PostgreSQL 17. Todo corre en Docker.
 Requiere Docker con Compose.
 
 ```sh
-git clone https://github.com/revmnds/TaqueriaSanIsidro.git
-cd TaqueriaSanIsidro
+git clone <url-del-repositorio> taqueria
+cd taqueria
 export UID GID=$(id -g)
 docker compose up -d --build
 ```
@@ -38,13 +38,14 @@ Se despliega como stack de Portainer desde este repo, detrás de Nginx Proxy Man
 
 En Portainer, Stacks > Add stack > Repository:
 
-- Repository URL: `https://github.com/revmnds/TaqueriaSanIsidro`, rama `refs/heads/main`.
+- Repository URL: la de este repo, rama `refs/heads/main`.
 - Compose path: `compose.prod.yaml`.
-- Authentication: token de GitHub (el repo es privado).
+- Authentication: token de GitHub, si el repo es privado.
 - Environment variables:
   - `APP_KEY`: `echo "base64:$(openssl rand -base64 32)"`. No se cambia después.
   - `APP_URL`: la URL pública con https.
   - `DB_PASSWORD`: `openssl rand -base64 24`.
+  - `REVERB_ALLOWED_ORIGINS`: el dominio público, sin https (ver Tiempo real).
 
 En Nginx Proxy Manager, un Proxy Host con el dominio que reenvía a `taqueria-web`, puerto 80, con certificado SSL.
 
@@ -62,9 +63,9 @@ El contenedor `taqueria-backup` respalda la base una vez al día en el volumen `
 # Ver los respaldos
 docker exec taqueria-backup ls -lh /backups
 # Bajar uno a esta carpeta
-docker cp taqueria-backup:/backups/taqueria-2026-10-15.dump .
+docker cp taqueria-backup:/backups/taqueria-AAAA-MM-DD.dump .
 # Restaurar (borra lo que haya en la base)
-docker exec -i taqueria-db pg_restore -U taqueria -d taqueria --clean --if-exists < taqueria-2026-10-15.dump
+docker exec -i taqueria-db pg_restore -U taqueria -d taqueria --clean --if-exists < taqueria-AAAA-MM-DD.dump
 ```
 
 ## Tiempo real
@@ -79,7 +80,7 @@ Si Reverb está caído, la app sigue funcionando y los pedidos se guardan; las p
 
 ## Rutas
 
-La raíz del dominio es para los clientes (`/`). El sistema del taquero (vender, pedidos, cocina, gastos, ajustes) vive bajo `ADMIN_PATH`, por defecto `/admon`: `https://taqueria.revmnds.com/admon`. Se cambia con la variable `ADMIN_PATH` (minúsculas, números y guiones). Si se cambia, hay que volver a instalar la app en el celular, porque su dirección de inicio es esa ruta.
+La raíz del dominio es para los clientes (`/`). El sistema del taquero (vender, pedidos, cocina, gastos, ajustes) vive bajo `ADMIN_PATH`, por defecto `/admon`: `https://tu-dominio.com/admon`. Se cambia con la variable `ADMIN_PATH` (minúsculas, números y guiones). Si se cambia, hay que volver a instalar la app en el celular, porque su dirección de inicio es esa ruta.
 
 ## Pedidos en línea
 
@@ -92,7 +93,7 @@ Contra pedidos falsos: nombre y teléfono obligatorios, límite de pedidos por e
 ### Seguridad de los pedidos en línea (para producción)
 
 - **IP del cliente.** Los límites de pedidos por equipo usan la IP que ve Laravel. Con `TRUSTED_PROXIES=*` (valor por defecto) se confía en cualquier proxy; si tu proxy exterior (Nginx Proxy Manager) añade a `X-Forwarded-For` en vez de reemplazarlo, alguien podría falsear su IP y saltarse solo el límite por equipo (siguen los límites por teléfono, global y de pedidos esperando, y cada pedido se acepta a mano). Lo mejor es poner en `TRUSTED_PROXIES` la IP o red del proxy real.
-- **Reverb.** `REVERB_APP_ID`, `REVERB_APP_KEY` y `REVERB_APP_SECRET` deben ser cadenas largas y aleatorias (no uses los valores del ejemplo). `REVERB_ALLOWED_ORIGINS` limita los orígenes de WebSocket (en producción, por defecto `taqueria.revmnds.com`; cámbialo si usas otro dominio). La API HTTP de Reverb (`/apps`) no se publica: solo `/app/` pasa por el proxy.
+- **Reverb.** `REVERB_APP_ID`, `REVERB_APP_KEY` y `REVERB_APP_SECRET` deben ser cadenas largas y aleatorias (no uses los valores del ejemplo). `REVERB_ALLOWED_ORIGINS` limita los orígenes de WebSocket y es obligatoria en producción (el dominio público sin https, por ejemplo `tu-dominio.com`; en desarrollo acepta cualquiera). La API HTTP de Reverb (`/apps`) no se publica: solo `/app/` pasa por el proxy.
 - **Datos de los clientes.** El enlace de seguimiento deja de funcionar 24 horas después de que el pedido termina. El teléfono y la dirección de un pedido en línea se borran a los 60 días (se conserva el nombre y lo vendido). Los pedidos que nadie acepta ni rechaza se cancelan solos a los 90 minutos. El token del enlace no se guarda en los registros de acceso de nginx.
 - **Límites.** Por equipo: 5 pedidos cada 10 minutos y 30 intentos; por teléfono: 3 por hora; entre todos: 40 cada 10 minutos y 25 pedidos esperando respuesta a la vez.
 

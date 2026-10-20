@@ -8,7 +8,7 @@ use Illuminate\Database\Seeder;
 
 /**
  * Insumos, recetas y extras de ejemplo para los productos de la taquería.
- * Costos aproximados de Matamoros (2026); ajústalos con las compras reales.
+ * Costos de ejemplo; ajústalos con las compras reales.
  *
  * php artisan db:seed --class=DemoRecipesSeeder
  */

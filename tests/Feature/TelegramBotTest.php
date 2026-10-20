@@ -821,18 +821,18 @@ class TelegramBotTest extends TestCase
 
     public function test_register_sets_the_webhook_commands_and_the_mini_app_button_over_https(): void
     {
-        config(['app.url' => 'https://taqueria.revmnds.com']);
-        URL::forceRootUrl('https://taqueria.revmnds.com');
+        config(['app.url' => 'https://taqueria.example.com']);
+        URL::forceRootUrl('https://taqueria.example.com');
         URL::forceScheme('https');
 
         $this->assertTrue(Telegram::register());
 
         $hook = $this->sent('setWebhook')[0];
-        $this->assertSame('https://taqueria.revmnds.com/telegram/webhook', $hook['url']);
+        $this->assertSame('https://taqueria.example.com/telegram/webhook', $hook['url']);
         $this->assertSame('secreto-del-webhook', $hook['secret_token']);
         $this->assertSame(['message', 'callback_query'], $hook['allowed_updates']);
         $this->assertNotEmpty($this->sent('setMyCommands'));
-        $this->assertSame('https://taqueria.revmnds.com/?source=telegram', $this->sent('setChatMenuButton')[0]['menu_button']['web_app']['url']);
+        $this->assertSame('https://taqueria.example.com/?source=telegram', $this->sent('setChatMenuButton')[0]['menu_button']['web_app']['url']);
     }
 
     public function test_the_rate_limiter_state_is_per_chat(): void
