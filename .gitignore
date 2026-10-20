@@ -26,3 +26,7 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 /.playwright-mcp
+/Video
+*.dump
+*.sql
+!/docker/postgres/create-test-db.sql
